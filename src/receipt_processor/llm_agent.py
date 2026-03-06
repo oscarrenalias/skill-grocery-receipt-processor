@@ -6,6 +6,7 @@ from agents import Agent, ModelSettings, RunConfig, Runner
 
 from receipt_processor.config import Settings
 from receipt_processor.schemas import LLMParseResult
+from receipt_processor.taxonomy import ALLOWED_C3
 
 
 class ParseError(RuntimeError):
@@ -25,6 +26,7 @@ def _model_settings_for(model: str) -> ModelSettings | None:
 
 
 def _build_instructions() -> str:
+    allowed_c3 = ",".join(ALLOWED_C3)
     return (
         "You parse Finnish grocery receipts into strict structured data using compact keys. "
         "Return JSON that exactly matches the short-key schema from the output type. "
@@ -36,6 +38,9 @@ def _build_instructions() -> str:
         "Never double-count: one product purchase must appear once in items. "
         "Units must map to canonical values only: piece,kg,g,l,ml,pack,unknown. "
         "utype must be one of piece,weight,volume,pack,unknown. "
+        "Classify taxonomy by selecting c3 from this exact allowlist only: "
+        f"{allowed_c3}. "
+        "If uncertain, set c3=uncategorized. c1/c2/cpath will be derived from c3. "
         "Recognize loyalty_type values: PLUSSA, OMA_PLUSSA, KAMPANJA, TASAERA, NONE. "
         "If uncertain, preserve raw and lower conf. "
         "For unsupported units set uom=unknown and utype=unknown."

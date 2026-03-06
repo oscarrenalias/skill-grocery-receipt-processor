@@ -42,18 +42,28 @@ def normalize_number(raw: str) -> float | None:
 
 
 def normalize_parse_result(result: LLMParseResult) -> None:
-    for item in result.items:
+    taxonomy_fallback_count = 0
+    for idx, item in enumerate(result.items):
         uom, utype = canonicalize_unit(item.raw_uom)
         if item.uom.value == "unknown":
             item.uom = uom
         if item.utype.value == "unknown":
             item.utype = utype
 
+        original_c3 = (item.c3 or "").strip().lower().replace(" ", "_")
         c1, c2, c3, cpath = normalize_category(item.c1, item.c2, item.c3)
         item.c1 = c1
         item.c2 = c2
         item.c3 = c3
         item.cpath = cpath
+        if original_c3 and original_c3 != c3:
+            taxonomy_fallback_count += 1
+            result.warn.append(f"Item {idx} taxonomy fallback from c3='{original_c3}' to c3='{c3}'")
+        if not original_c3 and c3 == "uncategorized":
+            taxonomy_fallback_count += 1
+
+    if taxonomy_fallback_count:
+        result.warn.append(f"Taxonomy fallback applied to {taxonomy_fallback_count} items")
 
     _deduplicate_non_item_lines(result)
 
