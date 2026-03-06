@@ -53,7 +53,7 @@ Run from repo root:
 
 ```bash
 uv run receipt-processor process --input <pdf-path> [--persist] [--debug] [--output <json-path>]
-uv run receipt-processor show (--rid <receipt-id> | --latest) [--include-raw-text] [--format text|json] [--output <path>]
+uv run receipt-processor show (--rid <receipt-id> | --latest) [--include-raw-text] [--format text|json|telegram] [--output <path>]
 ```
 
 Use `process` to parse a receipt PDF.  
@@ -98,7 +98,7 @@ User-facing reply guidance:
 - Instead say: "I can provide you with the full itemized receipt—just ask." and present the parsed results.
 
 `process` always prints JSON to stdout.  
-`show` prints plain text by default and JSON when `--format json` is set.
+`show` prints plain text by default, JSON when `--format json`, and Telegram-safe HTML when `--format telegram`.
 
 `process` success shape:
 
@@ -127,6 +127,13 @@ User-facing reply guidance:
 - Fixed-width ASCII table for items:
   - `Item (Finnish) | Unit | Quantity | Unit Price | Line Total`
 - Fixed-width ASCII table for adjustments when present.
+
+`show` telegram mode behavior (`--format telegram`):
+
+- Uses Telegram-compatible HTML only (no table tags).
+- Uses `<b>`, `<code>`, and `<pre>` for structure/readability.
+- Escapes dynamic content for safe rendering with Telegram HTML parse mode.
+- Emits one payload string; OpenClaw is responsible for chunking/splitting long messages.
 
 Error shape:
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 from pathlib import Path
@@ -63,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser.add_argument(
         "--format",
         dest="output_format",
-        choices=("text", "json"),
+        choices=("text", "json", "telegram"),
         default="text",
         help="Output format for show command (default: text)",
     )
@@ -113,6 +114,8 @@ def main() -> None:
             payload = error_payload("DB_READ_FAILED", f"Failed to read receipt: {exc}")
         if payload.get("status") == "error" or args.output_format == "json":
             _emit_json(payload, args.output_path)
+        elif args.output_format == "telegram":
+            _emit_text(_render_show_telegram(payload), args.output_path)
         else:
             _emit_text(_render_show_text(payload), args.output_path)
     else:  # pragma: no cover
@@ -186,6 +189,54 @@ def _render_show_text(payload: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_show_telegram(payload: dict) -> str:
+    receipt = payload.get("receipt", {})
+    lines = [
+        "<b>Receipt</b>",
+        f"<b>Receipt ID:</b> {_tg(payload.get('rid'))}",
+        f"<b>Store:</b> {_tg(receipt.get('store'))}",
+        f"<b>Address:</b> {_tg(receipt.get('addr'))}",
+        f"<b>Transaction Date:</b> {_tg(receipt.get('tx_date'))}",
+        f"<b>Transaction Time:</b> {_tg(receipt.get('tx_time'))}",
+        f"<b>Currency:</b> {_tg(receipt.get('cur'))}",
+        f"<b>Total:</b> <code>{_fmt_money(receipt.get('total'))}</code>",
+        "",
+        "<b>Items</b>",
+    ]
+
+    items = payload.get("items", [])
+    if not items:
+        lines.append("<i>(no items)</i>")
+    else:
+        for idx, item in enumerate(items, start=1):
+            fi_name = item.get("fi", "") or item.get("fi_raw", "") or item.get("raw", "")
+            uom = item.get("uom", "") or item.get("raw_uom", "")
+            qty = _fmt_number(item.get("qty"))
+            unit_price = _fmt_money(item.get("unit_price"))
+            line_total = _fmt_money(item.get("line_total"))
+            lines.append(
+                f"<code>{idx:02d}.</code> <b>{_tg(fi_name)}</b> | "
+                f"<code>{_tg(uom)}</code> | Qty <code>{_tg(qty)}</code> | "
+                f"Unit <code>{_tg(unit_price)}</code> | Line <code>{_tg(line_total)}</code>"
+            )
+
+    adjustments = payload.get("adj", [])
+    if adjustments:
+        lines.extend(["", "<b>Adjustments</b>"])
+        for adj in adjustments:
+            item_idx = "-" if adj.get("item_idx") is None else str(adj.get("item_idx"))
+            lines.append(
+                f"<code>{_tg(adj.get('type'))}</code> | "
+                f"Amt <code>{_tg(_fmt_money(adj.get('amt')))}</code> | "
+                f"Item <code>{_tg(item_idx)}</code> | {_tg(adj.get('raw'))}"
+            )
+
+    if "raw_text" in payload:
+        lines.extend(["", "<b>Raw Text</b>", f"<pre>{_tg(payload.get('raw_text'))}</pre>"])
+
+    return "\n".join(lines)
+
+
 def _fmt_number(value: object) -> str:
     if value is None:
         return ""
@@ -202,6 +253,12 @@ def _fmt_money(value: object) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _tg(value: object) -> str:
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=True)
 
 
 def _render_ascii_table(headers: list[str], rows: list[list[str]]) -> list[str]:

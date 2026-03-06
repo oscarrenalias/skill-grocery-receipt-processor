@@ -51,6 +51,13 @@ def test_cli_show_parses_json_format() -> None:
     assert args.output_format == "json"
 
 
+def test_cli_show_parses_telegram_format() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["show", "--rid", "abc-123", "--format", "telegram"])
+    assert args.command == "show"
+    assert args.output_format == "telegram"
+
+
 def test_cli_show_rejects_invalid_format() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
@@ -130,6 +137,49 @@ def test_cli_main_show_json_output(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out.strip()
     assert out.startswith("{")
     assert '"status": "ok"' in out
+
+
+def test_cli_main_show_telegram_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(
+        cli,
+        "get_receipt_dump_by_id",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "rid": "abc-123",
+            "receipt": {
+                "store": "K-City<market>",
+                "addr": "Main & Street",
+                "tx_date": "2026-03-01",
+                "tx_time": "10:01",
+                "cur": "EUR",
+                "total": 5.4,
+            },
+            "items": [
+                {
+                    "fi": "maito & kerma",
+                    "uom": "piece",
+                    "qty": 2,
+                    "unit_price": 1.7,
+                    "line_total": 3.4,
+                }
+            ],
+            "adj": [{"type": "disc", "amt": -0.5, "item_idx": 0, "raw": "promo <5%>"}],
+            "raw_text": "A&B <raw>",
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show", "--rid", "abc-123", "--format", "telegram", "--include-raw-text"])
+
+    cli.main()
+    out = capsys.readouterr().out
+    assert "<b>Receipt</b>" in out
+    assert "<b>Address:</b> Main &amp; Street" in out
+    assert "K-City&lt;market&gt;" in out
+    assert "maito &amp; kerma" in out
+    assert "<b>Adjustments</b>" in out
+    assert "<pre>A&amp;B &lt;raw&gt;</pre>" in out
+    assert not out.lstrip().startswith("{")
 
 
 def test_cli_main_show_error_always_json(monkeypatch, capsys) -> None:

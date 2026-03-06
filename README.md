@@ -35,7 +35,7 @@ Optional:
 
 ```bash
 receipt-processor process --input /path/to/receipt.pdf [--persist] [--debug] [--output /path/to/result.json]
-receipt-processor show (--rid <receipt_id> | --latest) [--include-raw-text] [--format text|json] [--output /path/to/result.txt]
+receipt-processor show (--rid <receipt_id> | --latest) [--include-raw-text] [--format text|json|telegram] [--output /path/to/result.txt]
 ```
 
 Parameters:
@@ -46,11 +46,11 @@ Parameters:
 - `show --rid <id>` Load persisted receipt by id.
 - `show --latest` Load the latest persisted receipt by transaction date/time.
 - `show --include-raw-text` Include stored raw receipt text.
-- `show --format text|json` Render `show` results as plain text (default) or JSON.
+- `show --format text|json|telegram` Render `show` as plain text (default), JSON, or Telegram-safe HTML.
 - `--output <path>` Also write rendered output to file.
 
 `process` always prints structured JSON to stdout.  
-`show` prints plain text by default and JSON when `--format json` is set.
+`show` prints plain text by default, JSON when `--format json`, and Telegram-safe HTML when `--format telegram`.
 
 `show --format text` output includes:
 
@@ -59,6 +59,12 @@ Parameters:
   - `Item (Finnish) | Unit | Quantity | Unit Price | Line Total`
 - A fixed-width ASCII table for adjustments when present
 - Optional `Raw Text` section when `--include-raw-text` is provided
+
+`show --format telegram` output includes:
+
+- Telegram-compatible HTML (`<b>`, `<code>`, `<pre>`) without table tags
+- Escaped dynamic content for safe rendering in Telegram HTML parse mode
+- Single payload output (chunking/splitting is expected to be handled by OpenClaw)
 
 ## Compact JSON format
 
