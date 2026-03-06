@@ -54,10 +54,16 @@ Run from repo root:
 ```bash
 uv run receipt-processor process --input <pdf-path> [--persist] [--debug] [--output <json-path>]
 uv run receipt-processor show-receipt (--rid <receipt-id> | --latest) [--include-raw-text] [--format text|json|markdown] [--output <path>]
+uv run receipt-processor list-receipts [--month YYYY-MM] [--format text|json|markdown] [--output <path>]
+uv run receipt-processor sql --query "<select ...>" [--output <json-path>]
+uv run receipt-processor schema [--output <json-path>]
+uv run receipt-processor describe <table> [--output <json-path>]
+uv run receipt-processor sample <table> [--limit 5] [--output <json-path>]
 ```
 
 Use `process` to parse a receipt PDF.  
 Use `show-receipt` to read one persisted receipt record (or the latest one).
+Use `sql`/`schema`/`describe`/`sample` for analytics and introspection workflows.
 
 ## File Input In OpenClaw
 
@@ -84,7 +90,7 @@ Notes:
   - User asks to process a receipt PDF, e.g., "please process this receipt" or "can you process the attached receipt file?".
   - User asks to show a stored receipt by `rid` (unlikely, since it's a technical identifier) or the latest receipt.
 - Invocation style:
-  - The agent should run the dedicated CLI commands (`receipt-processor process ...` and `receipt-processor show-receipt ...`), not rely on a separate tool API.
+  - The agent should run the dedicated CLI commands (`receipt-processor process ...`, `show-receipt ...`, `list-receipts ...`, `sql ...`, `schema ...`, `describe ...`, `sample ...`), not rely on a separate tool API.
 - Attachments flow (including Telegram):
   - User sends a PDF in Telegram.
   - OpenClaw downloads the attachment to a local file path.
@@ -99,6 +105,7 @@ User-facing reply guidance:
 
 `process` always prints JSON to stdout.  
 `show-receipt` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
+`sql`, `schema`, `describe`, and `sample` always print JSON.
 
 `process` success shape:
 
@@ -135,6 +142,14 @@ User-facing reply guidance:
 - Uses simple Markdown-ish formatting (`*bold*`, `` `code` ``, fenced code block).
 - Dynamic text is not Telegram-escaped; downstream systems (for example OpenClaw) should convert/escape as needed.
 - Emits one payload string; OpenClaw is responsible for chunking/splitting long messages.
+
+`sql` behavior:
+
+- Accepts SQL only via `--query`.
+- Allows a single read-only `SELECT` statement only.
+- Rejects comments, semicolons, `WITH`, and non-read SQL keywords.
+- Restricts queries to domain tables (`receipts`, `receipt_items`, `receipt_adjustments`).
+- Returns canonical `columns`/`rows`/`meta` JSON payload.
 
 Error shape:
 

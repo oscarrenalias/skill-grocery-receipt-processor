@@ -37,6 +37,10 @@ Optional:
 receipt-processor process --input /path/to/receipt.pdf [--persist] [--debug] [--output /path/to/result.json]
 receipt-processor show-receipt (--rid <receipt_id> | --latest) [--include-raw-text] [--format text|json|markdown] [--output /path/to/result.txt]
 receipt-processor list-receipts [--month YYYY-MM] [--format text|json|markdown] [--output /path/to/result.txt]
+receipt-processor sql --query "<select ...>" [--output /path/to/result.json]
+receipt-processor schema [--output /path/to/result.json]
+receipt-processor describe <table> [--output /path/to/result.json]
+receipt-processor sample <table> [--limit 5] [--output /path/to/result.json]
 ```
 
 Parameters:
@@ -53,11 +57,16 @@ Parameters:
 - `list-receipts --month YYYY-MM` List persisted receipts for a specific month.
   - Also accepts `MM/YYYY` (for example `02/2026`), but `YYYY-MM` is recommended.
 - `list-receipts --format text|json|markdown` Render `list-receipts` as plain text (default), JSON, or Markdown-ish text for chat integrations.
+- `sql --query "<select ...>"` Run a restricted read-only SQL query (JSON output only).
+- `schema` List queryable tables and columns (JSON output only).
+- `describe <table>` Describe one queryable table (JSON output only).
+- `sample <table> --limit <n>` Return a small sample row set from one queryable table (JSON output only).
 - `--output <path>` Also write rendered output to file.
 
 `process` always prints structured JSON to stdout.  
 `show-receipt` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
 `list-receipts` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
+`sql`, `schema`, `describe`, and `sample` always print JSON.
 
 `show-receipt --format text` output includes:
 
@@ -88,6 +97,34 @@ Item examples use short keys such as:
 - `fi`, `en`, `qty`, `utype`, `raw_uom`, `uom`, `line_total`, `loyalty_type`, `is_weighted`
 
 Default-valued fields are omitted to reduce payload size.
+
+## SQL Query Guardrails
+
+- `sql` accepts query text via `--query` only.
+- Query must be a single `SELECT` statement.
+- Query must not include leading/trailing whitespace, semicolons, SQL comments, or `WITH`.
+- Non-read keywords are rejected (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `ATTACH`, `PRAGMA`, etc.).
+- Only domain tables are allowed: `receipts`, `receipt_items`, `receipt_adjustments`.
+- Default row limit is applied when omitted (`LIMIT 5000`).
+
+Canonical JSON output for tabular results (`sql` and `sample`):
+
+```json
+{
+  "status": "ok",
+  "columns": ["category", "eur"],
+  "rows": [
+    ["meat", 42.15],
+    ["dairy", 18.9]
+  ],
+  "meta": {
+    "row_count": 2,
+    "truncated": false,
+    "limit_applied": 5000,
+    "execution_ms": 12
+  }
+}
+```
 
 ## Example
 
