@@ -24,8 +24,8 @@ def test_cli_process_parses_flags() -> None:
 
 def test_cli_show_parses_flags() -> None:
     parser = build_parser()
-    args = parser.parse_args(["show", "--rid", "abc-123", "--include-raw-text", "--output", "out.json"])
-    assert args.command == "show"
+    args = parser.parse_args(["show-receipt", "--rid", "abc-123", "--include-raw-text", "--output", "out.json"])
+    assert args.command == "show-receipt"
     assert args.rid == "abc-123"
     assert args.latest is False
     assert args.output_format == "text"
@@ -35,8 +35,8 @@ def test_cli_show_parses_flags() -> None:
 
 def test_cli_show_latest_parses_flags() -> None:
     parser = build_parser()
-    args = parser.parse_args(["show", "--latest", "--include-raw-text", "--output", "out.json"])
-    assert args.command == "show"
+    args = parser.parse_args(["show-receipt", "--latest", "--include-raw-text", "--output", "out.json"])
+    assert args.command == "show-receipt"
     assert args.latest is True
     assert args.rid is None
     assert args.output_format == "text"
@@ -46,34 +46,63 @@ def test_cli_show_latest_parses_flags() -> None:
 
 def test_cli_show_parses_json_format() -> None:
     parser = build_parser()
-    args = parser.parse_args(["show", "--rid", "abc-123", "--format", "json"])
-    assert args.command == "show"
+    args = parser.parse_args(["show-receipt", "--rid", "abc-123", "--format", "json"])
+    assert args.command == "show-receipt"
     assert args.output_format == "json"
 
 
-def test_cli_show_parses_telegram_format() -> None:
+def test_cli_show_parses_markdown_format() -> None:
     parser = build_parser()
-    args = parser.parse_args(["show", "--rid", "abc-123", "--format", "telegram"])
-    assert args.command == "show"
-    assert args.output_format == "telegram"
+    args = parser.parse_args(["show-receipt", "--rid", "abc-123", "--format", "markdown"])
+    assert args.command == "show-receipt"
+    assert args.output_format == "markdown"
 
 
 def test_cli_show_rejects_invalid_format() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
-        parser.parse_args(["show", "--rid", "abc-123", "--format", "yaml"])
+        parser.parse_args(["show-receipt", "--rid", "abc-123", "--format", "yaml"])
 
 
 def test_cli_show_requires_selector() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
-        parser.parse_args(["show"])
+        parser.parse_args(["show-receipt"])
 
 
 def test_cli_show_disallows_mixed_selectors() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
-        parser.parse_args(["show", "--rid", "abc-123", "--latest"])
+        parser.parse_args(["show-receipt", "--rid", "abc-123", "--latest"])
+
+
+def test_cli_list_receipts_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["list-receipts", "--month", "2026-02", "--output", "out.txt", "--format", "json"])
+    assert args.command == "list-receipts"
+    assert args.month == "2026-02"
+    assert args.output_path == "out.txt"
+    assert args.output_format == "json"
+
+
+def test_cli_list_receipts_parses_markdown_format() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["list-receipts", "--format", "markdown"])
+    assert args.command == "list-receipts"
+    assert args.output_format == "markdown"
+
+
+def test_cli_list_receipts_accepts_slash_month() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["list-receipts", "--month", "02/2026"])
+    assert args.command == "list-receipts"
+    assert args.month == "2026-02"
+
+
+def test_cli_list_receipts_rejects_invalid_month() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["list-receipts", "--month", "2026-13"])
 
 
 def test_cli_main_show_text_output(monkeypatch, capsys) -> None:
@@ -105,7 +134,7 @@ def test_cli_main_show_text_output(monkeypatch, capsys) -> None:
             "adj": [],
         },
     )
-    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show", "--rid", "abc-123"])
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show-receipt", "--rid", "abc-123"])
 
     cli.main()
     out = capsys.readouterr().out
@@ -131,7 +160,7 @@ def test_cli_main_show_json_output(monkeypatch, capsys) -> None:
             "adj": [],
         },
     )
-    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show", "--rid", "abc-123", "--format", "json"])
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show-receipt", "--rid", "abc-123", "--format", "json"])
 
     cli.main()
     out = capsys.readouterr().out.strip()
@@ -139,7 +168,7 @@ def test_cli_main_show_json_output(monkeypatch, capsys) -> None:
     assert '"status": "ok"' in out
 
 
-def test_cli_main_show_telegram_output(monkeypatch, capsys) -> None:
+def test_cli_main_show_markdown_output(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "load_dotenv", lambda: None)
     monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
     monkeypatch.setattr(
@@ -169,16 +198,21 @@ def test_cli_main_show_telegram_output(monkeypatch, capsys) -> None:
             "raw_text": "A&B <raw>",
         },
     )
-    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show", "--rid", "abc-123", "--format", "telegram", "--include-raw-text"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["receipt-processor", "show-receipt", "--rid", "abc-123", "--format", "markdown", "--include-raw-text"],
+    )
 
     cli.main()
     out = capsys.readouterr().out
-    assert "<b>Receipt</b>" in out
-    assert "<b>Address:</b> Main &amp; Street" in out
-    assert "K-City&lt;market&gt;" in out
-    assert "maito &amp; kerma" in out
-    assert "<b>Adjustments</b>" in out
-    assert "<pre>A&amp;B &lt;raw&gt;</pre>" in out
+    assert "*Receipt*" in out
+    assert "*Address:* Main & Street" in out
+    assert "K-City<market>" in out
+    assert "maito & kerma" in out
+    assert "*Adjustments*" in out
+    assert "```" in out
+    assert "A&B <raw>" in out
     assert not out.lstrip().startswith("{")
 
 
@@ -186,7 +220,7 @@ def test_cli_main_show_error_always_json(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "load_dotenv", lambda: None)
     monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
     monkeypatch.setattr(cli, "get_receipt_dump_by_id", lambda *args, **kwargs: None)
-    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show", "--rid", "missing", "--format", "text"])
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "show-receipt", "--rid", "missing", "--format", "text"])
 
     with pytest.raises(SystemExit) as exc:
         cli.main()
@@ -196,3 +230,87 @@ def test_cli_main_show_error_always_json(monkeypatch, capsys) -> None:
     assert out.startswith("{")
     assert '"status": "error"' in out
     assert '"err": "NOT_FOUND"' in out
+
+
+def test_cli_main_list_receipts_text_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(cli, "_current_month", lambda: "2026-03")
+    monkeypatch.setattr(
+        cli,
+        "list_receipt_summaries_by_month",
+        lambda *_args, **_kwargs: [
+            {
+                "rid": "abc-123",
+                "tx_date": "2026-03-01",
+                "tx_time": "10:01",
+                "store": "K-Citymarket",
+                "cur": "EUR",
+                "total": 5.4,
+                "status": "ok",
+                "created_at": "2026-03-06T12:00:00+00:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "list-receipts"])
+
+    cli.main()
+    out = capsys.readouterr().out
+    assert "Receipts (2026-03)" in out
+    assert "Count: 1" in out
+    assert "abc-123" in out
+    assert "K-Citymarket" in out
+    assert not out.lstrip().startswith("{")
+
+
+def test_cli_main_list_receipts_json_output_with_explicit_month(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(
+        cli,
+        "list_receipt_summaries_by_month",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["receipt-processor", "list-receipts", "--month", "2026-02", "--format", "json"],
+    )
+
+    cli.main()
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("{")
+    assert '"status": "ok"' in out
+    assert '"month": "2026-02"' in out
+    assert '"count": 0' in out
+
+
+def test_cli_main_list_receipts_markdown_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(cli, "_current_month", lambda: "2026-03")
+    monkeypatch.setattr(
+        cli,
+        "list_receipt_summaries_by_month",
+        lambda *_args, **_kwargs: [
+            {
+                "rid": "abc-123",
+                "tx_date": "2026-03-01",
+                "tx_time": "10:01",
+                "store": "K-City<market>",
+                "cur": "EUR",
+                "total": 5.4,
+                "status": "ok",
+                "created_at": "2026-03-06T12:00:00+00:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "list-receipts", "--format", "markdown"])
+
+    cli.main()
+    out = capsys.readouterr().out
+    assert "*Receipts*" in out
+    assert "*Month:* `2026-03`" in out
+    assert "K-City<market>" in out
+    assert "abc-123" in out
+    assert not out.lstrip().startswith("{")

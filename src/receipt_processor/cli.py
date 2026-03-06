@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import os
+import re
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from receipt_processor.config import ConfigError, load_settings
-from receipt_processor.db import create_engine_and_init, get_latest_receipt_dump, get_receipt_dump_by_id
+from receipt_processor.db import (
+    create_engine_and_init,
+    get_latest_receipt_dump,
+    get_receipt_dump_by_id,
+    list_receipt_summaries_by_month,
+)
 from receipt_processor.errors import error_payload
 from receipt_processor.pipeline import process_receipt
 
@@ -43,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path to also write structured JSON output",
     )
 
-    show_parser = subparsers.add_parser("show", help="Show a persisted receipt by rid or latest")
+    show_parser = subparsers.add_parser("show-receipt", help="Show a persisted receipt by rid or latest")
     show_selector = show_parser.add_mutually_exclusive_group(required=True)
     show_selector.add_argument("--rid", help="Receipt ID to fetch")
     show_selector.add_argument(
@@ -64,9 +70,28 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser.add_argument(
         "--format",
         dest="output_format",
-        choices=("text", "json", "telegram"),
+        choices=("text", "json", "markdown"),
         default="text",
-        help="Output format for show command (default: text)",
+        help="Output format for show-receipt command (default: text)",
+    )
+
+    list_parser = subparsers.add_parser("list-receipts", help="List persisted receipts for a month")
+    list_parser.add_argument(
+        "--month",
+        type=_parse_month_argument,
+        help="Month filter in YYYY-MM (recommended) or MM/YYYY; defaults to current month",
+    )
+    list_parser.add_argument(
+        "--output",
+        dest="output_path",
+        help="Optional path to also write structured JSON output",
+    )
+    list_parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=("text", "json", "markdown"),
+        default="text",
+        help="Output format for list-receipts command (default: text)",
     )
     return parser
 
@@ -90,7 +115,7 @@ def main() -> None:
             settings=settings,
         )
         _emit_json(payload, args.output_path)
-    elif args.command == "show":
+    elif args.command == "show-receipt":
         load_dotenv()
         db_path = os.getenv("RECEIPT_DB_PATH", "./data/receipts.sqlite")
         try:
@@ -112,12 +137,35 @@ def main() -> None:
                     payload = error_payload("NOT_FOUND", f"Receipt not found for rid={args.rid}")
         except Exception as exc:
             payload = error_payload("DB_READ_FAILED", f"Failed to read receipt: {exc}")
-        if payload.get("status") == "error" or args.output_format == "json":
-            _emit_json(payload, args.output_path)
-        elif args.output_format == "telegram":
-            _emit_text(_render_show_telegram(payload), args.output_path)
-        else:
-            _emit_text(_render_show_text(payload), args.output_path)
+        _emit_formatted_payload(
+            payload,
+            output_format=args.output_format,
+            output_path=args.output_path,
+            text_renderer=_render_show_text,
+            markdown_renderer=_render_show_markdown,
+        )
+    elif args.command == "list-receipts":
+        load_dotenv()
+        db_path = os.getenv("RECEIPT_DB_PATH", "./data/receipts.sqlite")
+        month = args.month or _current_month()
+        try:
+            engine = create_engine_and_init(db_path)
+            receipts_payload = list_receipt_summaries_by_month(engine, month)
+            payload = {
+                "status": "ok",
+                "filter": {"month": month},
+                "count": len(receipts_payload),
+                "receipts": receipts_payload,
+            }
+        except Exception as exc:
+            payload = error_payload("DB_READ_FAILED", f"Failed to read receipts: {exc}")
+        _emit_formatted_payload(
+            payload,
+            output_format=args.output_format,
+            output_path=args.output_path,
+            text_renderer=_render_list_receipts_text,
+            markdown_renderer=_render_list_receipts_markdown,
+        )
     else:  # pragma: no cover
         payload = error_payload("INVALID_ARGUMENTS", "Unknown command")
         _emit_json(payload, args.output_path)
@@ -141,6 +189,22 @@ def _emit_text(text: str, output_path: str | None) -> None:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{text}\n", encoding="utf-8")
+
+
+def _emit_formatted_payload(
+    payload: dict,
+    *,
+    output_format: str,
+    output_path: str | None,
+    text_renderer,
+    markdown_renderer,
+) -> None:
+    if payload.get("status") == "error" or output_format == "json":
+        _emit_json(payload, output_path)
+    elif output_format == "markdown":
+        _emit_text(markdown_renderer(payload), output_path)
+    else:
+        _emit_text(text_renderer(payload), output_path)
 
 
 def _render_show_text(payload: dict) -> str:
@@ -189,24 +253,54 @@ def _render_show_text(payload: dict) -> str:
     return "\n".join(lines)
 
 
-def _render_show_telegram(payload: dict) -> str:
+def _render_list_receipts_text(payload: dict) -> str:
+    month = payload.get("filter", {}).get("month", "")
+    receipts_payload = payload.get("receipts", [])
+    lines = [
+        f"Receipts ({month})",
+        f"Count: {payload.get('count', 0)}",
+        "",
+    ]
+
+    headers = ["Receipt ID", "Transaction Date", "Transaction Time", "Store", "Currency", "Total", "Status"]
+    rows: list[list[str]] = []
+    if not receipts_payload:
+        rows.append(["(no receipts found)", "", "", "", "", "", ""])
+    else:
+        for receipt in receipts_payload:
+            rows.append(
+                [
+                    str(receipt.get("rid", "")),
+                    str(receipt.get("tx_date", "")),
+                    str(receipt.get("tx_time", "")),
+                    str(receipt.get("store", "")),
+                    str(receipt.get("cur", "")),
+                    _fmt_money(receipt.get("total")),
+                    str(receipt.get("status", "")),
+                ]
+            )
+    lines.extend(_render_ascii_table(headers, rows))
+    return "\n".join(lines)
+
+
+def _render_show_markdown(payload: dict) -> str:
     receipt = payload.get("receipt", {})
     lines = [
-        "<b>Receipt</b>",
-        f"<b>Receipt ID:</b> {_tg(payload.get('rid'))}",
-        f"<b>Store:</b> {_tg(receipt.get('store'))}",
-        f"<b>Address:</b> {_tg(receipt.get('addr'))}",
-        f"<b>Transaction Date:</b> {_tg(receipt.get('tx_date'))}",
-        f"<b>Transaction Time:</b> {_tg(receipt.get('tx_time'))}",
-        f"<b>Currency:</b> {_tg(receipt.get('cur'))}",
-        f"<b>Total:</b> <code>{_fmt_money(receipt.get('total'))}</code>",
+        "*Receipt*",
+        f"*Receipt ID:* `{_md(payload.get('rid'))}`",
+        f"*Store:* {_md(receipt.get('store'))}",
+        f"*Address:* {_md(receipt.get('addr'))}",
+        f"*Transaction Date:* `{_md(receipt.get('tx_date'))}`",
+        f"*Transaction Time:* `{_md(receipt.get('tx_time'))}`",
+        f"*Currency:* `{_md(receipt.get('cur'))}`",
+        f"*Total:* `{_md(_fmt_money(receipt.get('total')))}`",
         "",
-        "<b>Items</b>",
+        "*Items*",
     ]
 
     items = payload.get("items", [])
     if not items:
-        lines.append("<i>(no items)</i>")
+        lines.append("_(no items)_")
     else:
         for idx, item in enumerate(items, start=1):
             fi_name = item.get("fi", "") or item.get("fi_raw", "") or item.get("raw", "")
@@ -215,25 +309,51 @@ def _render_show_telegram(payload: dict) -> str:
             unit_price = _fmt_money(item.get("unit_price"))
             line_total = _fmt_money(item.get("line_total"))
             lines.append(
-                f"<code>{idx:02d}.</code> <b>{_tg(fi_name)}</b> | "
-                f"<code>{_tg(uom)}</code> | Qty <code>{_tg(qty)}</code> | "
-                f"Unit <code>{_tg(unit_price)}</code> | Line <code>{_tg(line_total)}</code>"
+                f"`{idx:02d}.` *{_md(fi_name)}* | "
+                f"`{_md(uom)}` | Qty `{_md(qty)}` | "
+                f"Unit `{_md(unit_price)}` | Line `{_md(line_total)}`"
             )
 
     adjustments = payload.get("adj", [])
     if adjustments:
-        lines.extend(["", "<b>Adjustments</b>"])
+        lines.extend(["", "*Adjustments*"])
         for adj in adjustments:
             item_idx = "-" if adj.get("item_idx") is None else str(adj.get("item_idx"))
             lines.append(
-                f"<code>{_tg(adj.get('type'))}</code> | "
-                f"Amt <code>{_tg(_fmt_money(adj.get('amt')))}</code> | "
-                f"Item <code>{_tg(item_idx)}</code> | {_tg(adj.get('raw'))}"
+                f"`{_md(adj.get('type'))}` | "
+                f"Amt `{_md(_fmt_money(adj.get('amt')))}` | "
+                f"Item `{_md(item_idx)}` | {_md(adj.get('raw'))}"
             )
 
     if "raw_text" in payload:
-        lines.extend(["", "<b>Raw Text</b>", f"<pre>{_tg(payload.get('raw_text'))}</pre>"])
+        lines.extend(["", "*Raw Text*", f"```\n{_md(payload.get('raw_text'))}\n```"])
 
+    return "\n".join(lines)
+
+
+def _render_list_receipts_markdown(payload: dict) -> str:
+    month = payload.get("filter", {}).get("month", "")
+    receipts_payload = payload.get("receipts", [])
+    lines = [
+        "*Receipts*",
+        f"*Month:* `{_md(month)}`",
+        f"*Count:* `{_md(payload.get('count', 0))}`",
+        "",
+    ]
+    if not receipts_payload:
+        lines.append("_(no receipts found)_")
+        return "\n".join(lines)
+
+    for idx, receipt in enumerate(receipts_payload, start=1):
+        lines.append(
+            f"`{idx:02d}.` "
+            f"RID `{_md(receipt.get('rid', ''))}` | "
+            f"Date `{_md(receipt.get('tx_date', ''))}` "
+            f"`{_md(receipt.get('tx_time', ''))}` | "
+            f"Store *{_md(receipt.get('store', ''))}* | "
+            f"Total `{_md(_fmt_money(receipt.get('total')))} {_md(receipt.get('cur', ''))}` | "
+            f"Status `{_md(receipt.get('status', ''))}`"
+        )
     return "\n".join(lines)
 
 
@@ -255,10 +375,33 @@ def _fmt_money(value: object) -> str:
         return str(value)
 
 
-def _tg(value: object) -> str:
+def _md(value: object) -> str:
     if value is None:
         return ""
-    return html.escape(str(value), quote=True)
+    return str(value)
+
+
+def _parse_month_argument(value: str) -> str:
+    stripped = value.strip()
+    iso_match = re.fullmatch(r"(\d{4})-(\d{2})", stripped)
+    if iso_match:
+        year, month = iso_match.groups()
+        if 1 <= int(month) <= 12:
+            return f"{year}-{month}"
+        raise argparse.ArgumentTypeError("month must be between 01 and 12")
+
+    slash_match = re.fullmatch(r"(\d{2})/(\d{4})", stripped)
+    if slash_match:
+        month, year = slash_match.groups()
+        if 1 <= int(month) <= 12:
+            return f"{year}-{month}"
+        raise argparse.ArgumentTypeError("month must be between 01 and 12")
+
+    raise argparse.ArgumentTypeError("invalid month format; use YYYY-MM (recommended) or MM/YYYY")
+
+
+def _current_month() -> str:
+    return date.today().strftime("%Y-%m")
 
 
 def _render_ascii_table(headers: list[str], rows: list[list[str]]) -> list[str]:

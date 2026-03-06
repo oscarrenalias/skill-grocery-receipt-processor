@@ -35,7 +35,8 @@ Optional:
 
 ```bash
 receipt-processor process --input /path/to/receipt.pdf [--persist] [--debug] [--output /path/to/result.json]
-receipt-processor show (--rid <receipt_id> | --latest) [--include-raw-text] [--format text|json|telegram] [--output /path/to/result.txt]
+receipt-processor show-receipt (--rid <receipt_id> | --latest) [--include-raw-text] [--format text|json|markdown] [--output /path/to/result.txt]
+receipt-processor list-receipts [--month YYYY-MM] [--format text|json|markdown] [--output /path/to/result.txt]
 ```
 
 Parameters:
@@ -43,16 +44,21 @@ Parameters:
 - `process --input <path>` Process a receipt PDF.
 - `process --persist` Persist to SQLite.
 - `process --debug` Enable debug behavior.
-- `show --rid <id>` Load persisted receipt by id.
-- `show --latest` Load the latest persisted receipt by transaction date/time.
-- `show --include-raw-text` Include stored raw receipt text.
-- `show --format text|json|telegram` Render `show` as plain text (default), JSON, or Telegram-safe HTML.
+- `show-receipt --rid <id>` Load persisted receipt by id.
+- `show-receipt --latest` Load the latest persisted receipt by transaction date/time.
+- `show-receipt --include-raw-text` Include stored raw receipt text.
+- `show-receipt --format text|json|markdown` Render `show-receipt` as plain text (default), JSON, or Markdown-ish text for chat integrations.
+- `list-receipts` List persisted receipts for the current month by default.
+- `list-receipts --month YYYY-MM` List persisted receipts for a specific month.
+  - Also accepts `MM/YYYY` (for example `02/2026`), but `YYYY-MM` is recommended.
+- `list-receipts --format text|json|markdown` Render `list-receipts` as plain text (default), JSON, or Markdown-ish text for chat integrations.
 - `--output <path>` Also write rendered output to file.
 
 `process` always prints structured JSON to stdout.  
-`show` prints plain text by default, JSON when `--format json`, and Telegram-safe HTML when `--format telegram`.
+`show-receipt` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
+`list-receipts` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
 
-`show --format text` output includes:
+`show-receipt --format text` output includes:
 
 - Human-readable receipt fields (`Receipt ID`, `Store`, `Address`, `Transaction Date`, etc.)
 - A fixed-width ASCII table for line items:
@@ -60,10 +66,10 @@ Parameters:
 - A fixed-width ASCII table for adjustments when present
 - Optional `Raw Text` section when `--include-raw-text` is provided
 
-`show --format telegram` output includes:
+`show-receipt --format markdown` output includes:
 
-- Telegram-compatible HTML (`<b>`, `<code>`, `<pre>`) without table tags
-- Escaped dynamic content for safe rendering in Telegram HTML parse mode
+- Simple Markdown-ish formatting (`*bold*`, `` `code` ``, fenced code block)
+- Raw dynamic content (no Telegram-specific escaping). Downstream systems (for example OpenClaw) should handle platform-specific conversion/escaping.
 - Single payload output (chunking/splitting is expected to be handled by OpenClaw)
 
 ## Compact JSON format

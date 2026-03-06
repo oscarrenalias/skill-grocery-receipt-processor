@@ -53,11 +53,11 @@ Run from repo root:
 
 ```bash
 uv run receipt-processor process --input <pdf-path> [--persist] [--debug] [--output <json-path>]
-uv run receipt-processor show (--rid <receipt-id> | --latest) [--include-raw-text] [--format text|json|telegram] [--output <path>]
+uv run receipt-processor show-receipt (--rid <receipt-id> | --latest) [--include-raw-text] [--format text|json|markdown] [--output <path>]
 ```
 
 Use `process` to parse a receipt PDF.  
-Use `show` to read one persisted receipt record (or the latest one).
+Use `show-receipt` to read one persisted receipt record (or the latest one).
 
 ## File Input In OpenClaw
 
@@ -84,7 +84,7 @@ Notes:
   - User asks to process a receipt PDF, e.g., "please process this receipt" or "can you process the attached receipt file?".
   - User asks to show a stored receipt by `rid` (unlikely, since it's a technical identifier) or the latest receipt.
 - Invocation style:
-  - The agent should run the dedicated CLI commands (`receipt-processor process ...` and `receipt-processor show ...`), not rely on a separate tool API.
+  - The agent should run the dedicated CLI commands (`receipt-processor process ...` and `receipt-processor show-receipt ...`), not rely on a separate tool API.
 - Attachments flow (including Telegram):
   - User sends a PDF in Telegram.
   - OpenClaw downloads the attachment to a local file path.
@@ -98,7 +98,7 @@ User-facing reply guidance:
 - Instead say: "I can provide you with the full itemized receipt—just ask." and present the parsed results.
 
 `process` always prints JSON to stdout.  
-`show` prints plain text by default, JSON when `--format json`, and Telegram-safe HTML when `--format telegram`.
+`show-receipt` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
 
 `process` success shape:
 
@@ -116,23 +116,22 @@ User-facing reply guidance:
 - Include full `receipt`, `items`, and `adj` when `status=partial` or `--debug` is enabled.
 - `ok` responses are compact summary payloads unless `--debug` is set.
 
-`show` success shape:
+`show-receipt` success shape:
 
 - Persisted receipt payload by `rid` or latest selector (receipt fields, `items`, `adj`).
 - Include stored raw OCR text only when `--include-raw-text` is set.
 
-`show` text mode behavior (`--format text`, default):
+`show-receipt` text mode behavior (`--format text`, default):
 
 - Header fields with descriptive names (for example `Address`, `Transaction Date`).
 - Fixed-width ASCII table for items:
   - `Item (Finnish) | Unit | Quantity | Unit Price | Line Total`
 - Fixed-width ASCII table for adjustments when present.
 
-`show` telegram mode behavior (`--format telegram`):
+`show-receipt` markdown mode behavior (`--format markdown`):
 
-- Uses Telegram-compatible HTML only (no table tags).
-- Uses `<b>`, `<code>`, and `<pre>` for structure/readability.
-- Escapes dynamic content for safe rendering with Telegram HTML parse mode.
+- Uses simple Markdown-ish formatting (`*bold*`, `` `code` ``, fenced code block).
+- Dynamic text is not Telegram-escaped; downstream systems (for example OpenClaw) should convert/escape as needed.
 - Emits one payload string; OpenClaw is responsible for chunking/splitting long messages.
 
 Error shape:
@@ -173,5 +172,5 @@ Default model intent in current code:
 
 1. For normal parsing, run `process` without `--debug`.
 2. For mismatch troubleshooting, rerun with `--debug` to return full item and adjustment arrays.
-3. For durable lookup workflows, run with `--persist`, then use returned `rid` with `show`.
+3. For durable lookup workflows, run with `--persist`, then use returned `rid` with `show-receipt`.
 4. On failures, return the JSON error payload directly and preserve `warn` entries.

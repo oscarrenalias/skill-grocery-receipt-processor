@@ -7,6 +7,7 @@ from receipt_processor.db import (
     create_engine_and_init,
     get_latest_receipt_dump,
     get_receipt_dump_by_id,
+    list_receipt_summaries_by_month,
     receipts,
 )
 from receipt_processor.pipeline import process_receipt
@@ -241,3 +242,69 @@ def test_get_latest_receipt_dump_not_found(tmp_path) -> None:
     engine = create_engine_and_init(str(db_path))
     dumped = get_latest_receipt_dump(engine)
     assert dumped is None
+
+
+def test_list_receipt_summaries_by_month_filters_and_orders(tmp_path) -> None:
+    db_path = tmp_path / "receipts.sqlite"
+    engine = create_engine_and_init(str(db_path))
+    with engine.begin() as conn:
+        conn.execute(
+            insert(receipts),
+            [
+                {
+                    "rid": "r-1",
+                    "doc_hash": "doc-1",
+                    "src": "a.pdf",
+                    "store": "K-Citymarket",
+                    "addr": "",
+                    "tx_date": "2026-02-10",
+                    "tx_time": "09:00",
+                    "cur": "EUR",
+                    "total": 2.0,
+                    "raw_text": "x",
+                    "raw_payload": "{}",
+                    "extract": "seed",
+                    "status": "ok",
+                    "created_at": "2026-03-06T12:00:00+00:00",
+                },
+                {
+                    "rid": "r-2",
+                    "doc_hash": "doc-2",
+                    "src": "b.pdf",
+                    "store": "S-Market",
+                    "addr": "",
+                    "tx_date": "2026-02-28",
+                    "tx_time": "20:15",
+                    "cur": "EUR",
+                    "total": 4.5,
+                    "raw_text": "x",
+                    "raw_payload": "{}",
+                    "extract": "seed",
+                    "status": "ok",
+                    "created_at": "2026-03-06T12:01:00+00:00",
+                },
+                {
+                    "rid": "r-3",
+                    "doc_hash": "doc-3",
+                    "src": "c.pdf",
+                    "store": "Lidl",
+                    "addr": "",
+                    "tx_date": "2026-03-01",
+                    "tx_time": "10:00",
+                    "cur": "EUR",
+                    "total": 1.5,
+                    "raw_text": "x",
+                    "raw_payload": "{}",
+                    "extract": "seed",
+                    "status": "ok",
+                    "created_at": "2026-03-06T12:02:00+00:00",
+                },
+            ],
+        )
+
+    feb = list_receipt_summaries_by_month(engine, "2026-02")
+    assert [row["rid"] for row in feb] == ["r-2", "r-1"]
+    assert all(row["tx_date"].startswith("2026-02-") for row in feb)
+
+    march = list_receipt_summaries_by_month(engine, "2026-03")
+    assert [row["rid"] for row in march] == ["r-3"]

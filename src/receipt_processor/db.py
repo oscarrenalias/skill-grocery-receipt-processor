@@ -352,6 +352,47 @@ def get_latest_receipt_dump(engine: Engine, include_raw_text: bool = False) -> d
     return _build_receipt_dump(engine, receipt_row._mapping, include_raw_text=include_raw_text)
 
 
+def list_receipt_summaries_by_month(engine: Engine, month: str) -> list[dict]:
+    month_prefix = f"{month}-%"
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                receipts.c.rid,
+                receipts.c.store,
+                receipts.c.tx_date,
+                receipts.c.tx_time,
+                receipts.c.cur,
+                receipts.c.total,
+                receipts.c.status,
+                receipts.c.created_at,
+            )
+            .where(receipts.c.tx_date.like(month_prefix))
+            .order_by(
+                receipts.c.tx_date.desc(),
+                receipts.c.tx_time.desc(),
+                receipts.c.created_at.desc(),
+                receipts.c.rid.desc(),
+            )
+        ).all()
+
+    payload = []
+    for row in rows:
+        m = row._mapping
+        payload.append(
+            {
+                "rid": m["rid"],
+                "store": m["store"],
+                "tx_date": m["tx_date"],
+                "tx_time": m["tx_time"],
+                "cur": m["cur"],
+                "total": m["total"],
+                "status": m["status"],
+                "created_at": m["created_at"],
+            }
+        )
+    return payload
+
+
 def _build_receipt_dump(engine: Engine, receipt_map: dict, include_raw_text: bool) -> dict:
     rid = str(receipt_map["rid"])
     with engine.connect() as conn:
