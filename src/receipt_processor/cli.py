@@ -302,28 +302,11 @@ def _render_show_markdown(payload: dict) -> str:
     if not items:
         lines.append("_(no items)_")
     else:
-        for idx, item in enumerate(items, start=1):
-            fi_name = item.get("fi", "") or item.get("fi_raw", "") or item.get("raw", "")
-            uom = item.get("uom", "") or item.get("raw_uom", "")
-            qty = _fmt_number(item.get("qty"))
-            unit_price = _fmt_money(item.get("unit_price"))
-            line_total = _fmt_money(item.get("line_total"))
-            lines.append(
-                f"`{idx:02d}.` *{_md(fi_name)}* | "
-                f"`{_md(uom)}` | Qty `{_md(qty)}` | "
-                f"Unit `{_md(unit_price)}` | Line `{_md(line_total)}`"
-            )
+        lines.extend(["```", *_render_receipt_item_lines(items), "```"])
 
     adjustments = payload.get("adj", [])
     if adjustments:
-        lines.extend(["", "*Adjustments*"])
-        for adj in adjustments:
-            item_idx = "-" if adj.get("item_idx") is None else str(adj.get("item_idx"))
-            lines.append(
-                f"`{_md(adj.get('type'))}` | "
-                f"Amt `{_md(_fmt_money(adj.get('amt')))}` | "
-                f"Item `{_md(item_idx)}` | {_md(adj.get('raw'))}"
-            )
+        lines.extend(["", "*Adjustments*", "```", *_render_receipt_adjustment_lines(adjustments), "```"])
 
     if "raw_text" in payload:
         lines.extend(["", "*Raw Text*", f"```\n{_md(payload.get('raw_text'))}\n```"])
@@ -344,16 +327,7 @@ def _render_list_receipts_markdown(payload: dict) -> str:
         lines.append("_(no receipts found)_")
         return "\n".join(lines)
 
-    for idx, receipt in enumerate(receipts_payload, start=1):
-        lines.append(
-            f"`{idx:02d}.` "
-            f"RID `{_md(receipt.get('rid', ''))}` | "
-            f"Date `{_md(receipt.get('tx_date', ''))}` "
-            f"`{_md(receipt.get('tx_time', ''))}` | "
-            f"Store *{_md(receipt.get('store', ''))}* | "
-            f"Total `{_md(_fmt_money(receipt.get('total')))} {_md(receipt.get('cur', ''))}` | "
-            f"Status `{_md(receipt.get('status', ''))}`"
-        )
+    lines.extend(["```", *_render_list_receipts_lines(receipts_payload), "```"])
     return "\n".join(lines)
 
 
@@ -373,6 +347,78 @@ def _fmt_money(value: object) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _render_receipt_item_lines(items: list[dict]) -> list[str]:
+    normalized_rows: list[tuple[str, str, str, str, str, str]] = []
+    for idx, item in enumerate(items, start=1):
+        fi_name = str(item.get("fi", "") or item.get("fi_raw", "") or item.get("raw", ""))
+        uom = str(item.get("uom", "") or item.get("raw_uom", ""))
+        qty = _fmt_number(item.get("qty"))
+        unit_price = _fmt_money(item.get("unit_price"))
+        line_total = _fmt_money(item.get("line_total"))
+        normalized_rows.append((f"{idx:02d}.", fi_name, uom, qty, unit_price, line_total))
+
+    name_w = max(len(row[1]) for row in normalized_rows)
+    uom_w = max(5, max(len(row[2]) for row in normalized_rows))
+    qty_w = max(3, max(len(row[3]) for row in normalized_rows))
+    money_w = max(4, max(max(len(row[4]), len(row[5])) for row in normalized_rows))
+
+    lines: list[str] = []
+    for idx_dot, fi_name, uom, qty, unit_price, line_total in normalized_rows:
+        lines.append(
+            f"{idx_dot} {fi_name:<{name_w}}  {uom:<{uom_w}}  "
+            f"qty {qty:>{qty_w}}  unit {unit_price:>{money_w}}  line {line_total:>{money_w}}"
+        )
+    return lines
+
+
+def _render_receipt_adjustment_lines(adjustments: list[dict]) -> list[str]:
+    normalized_rows: list[tuple[str, str, str, str]] = []
+    for adj in adjustments:
+        adj_type = str(adj.get("type", ""))
+        amt = _fmt_money(adj.get("amt"))
+        item_idx = "-" if adj.get("item_idx") is None else str(adj.get("item_idx"))
+        raw = str(adj.get("raw", ""))
+        normalized_rows.append((adj_type, amt, item_idx, raw))
+
+    type_w = max(4, max(len(row[0]) for row in normalized_rows))
+    amt_w = max(3, max(len(row[1]) for row in normalized_rows))
+    idx_w = max(4, max(len(row[2]) for row in normalized_rows))
+
+    return [
+        f"type {adj_type:<{type_w}}  amt {amt:>{amt_w}}  item {item_idx:<{idx_w}}  raw {raw}"
+        for adj_type, amt, item_idx, raw in normalized_rows
+    ]
+
+
+def _render_list_receipts_lines(receipts_payload: list[dict]) -> list[str]:
+    normalized_rows: list[tuple[str, str, str, str, str, str, str]] = []
+    for idx, receipt in enumerate(receipts_payload, start=1):
+        rid = str(receipt.get("rid", ""))
+        tx_date = str(receipt.get("tx_date", ""))
+        tx_time = str(receipt.get("tx_time", ""))
+        store = str(receipt.get("store", ""))
+        cur = str(receipt.get("cur", ""))
+        total = _fmt_money(receipt.get("total"))
+        status = str(receipt.get("status", ""))
+        normalized_rows.append((f"{idx:02d}.", rid, tx_date, tx_time, store, f"{total} {cur}".strip(), status))
+
+    rid_w = max(3, max(len(row[1]) for row in normalized_rows))
+    date_w = max(10, max(len(row[2]) for row in normalized_rows))
+    time_w = max(5, max(len(row[3]) for row in normalized_rows))
+    store_w = max(5, max(len(row[4]) for row in normalized_rows))
+    total_w = max(5, max(len(row[5]) for row in normalized_rows))
+    status_w = max(6, max(len(row[6]) for row in normalized_rows))
+
+    return [
+        f"{idx_dot} {rid:<{rid_w}}  "
+        f"{tx_date:<{date_w}} {tx_time:<{time_w}}  "
+        f"{store:<{store_w}}  "
+        f"total {total_cur:>{total_w}}  "
+        f"status {status:<{status_w}}"
+        for idx_dot, rid, tx_date, tx_time, store, total_cur, status in normalized_rows
+    ]
 
 
 def _md(value: object) -> str:
