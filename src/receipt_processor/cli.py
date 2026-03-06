@@ -18,6 +18,7 @@ from receipt_processor.db import (
 )
 from receipt_processor.errors import error_payload
 from receipt_processor.pipeline import process_receipt
+from receipt_processor.query import describe_table, execute_readonly_sql, get_schema_summary, sample_table
 
 
 class JsonArgumentParser(argparse.ArgumentParser):
@@ -93,6 +94,43 @@ def build_parser() -> argparse.ArgumentParser:
         default="text",
         help="Output format for list-receipts command (default: text)",
     )
+
+    sql_parser = subparsers.add_parser("sql", help="Run restricted read-only SQL query")
+    sql_parser.add_argument("--query", required=True, help="Single SELECT SQL query to execute")
+    sql_parser.add_argument(
+        "--output",
+        dest="output_path",
+        help="Optional path to also write structured JSON output",
+    )
+
+    schema_parser = subparsers.add_parser("schema", help="List queryable tables and columns")
+    schema_parser.add_argument(
+        "--output",
+        dest="output_path",
+        help="Optional path to also write structured JSON output",
+    )
+
+    describe_parser = subparsers.add_parser("describe", help="Describe a queryable table")
+    describe_parser.add_argument("table", help="Table name to describe")
+    describe_parser.add_argument(
+        "--output",
+        dest="output_path",
+        help="Optional path to also write structured JSON output",
+    )
+
+    sample_parser = subparsers.add_parser("sample", help="Sample rows from a queryable table")
+    sample_parser.add_argument("table", help="Table name to sample")
+    sample_parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of rows to return (default: 5)",
+    )
+    sample_parser.add_argument(
+        "--output",
+        dest="output_path",
+        help="Optional path to also write structured JSON output",
+    )
     return parser
 
 
@@ -166,6 +204,50 @@ def main() -> None:
             text_renderer=_render_list_receipts_text,
             markdown_renderer=_render_list_receipts_markdown,
         )
+    elif args.command == "sql":
+        load_dotenv()
+        db_path = os.getenv("RECEIPT_DB_PATH", "./data/receipts.sqlite")
+        try:
+            create_engine_and_init(db_path)
+            payload = execute_readonly_sql(db_path, args.query)
+        except ValueError as exc:
+            payload = error_payload("INVALID_ARGUMENTS", str(exc))
+        except Exception as exc:
+            payload = error_payload("DB_READ_FAILED", f"Failed to run SQL query: {exc}")
+        _emit_json(payload, args.output_path)
+    elif args.command == "schema":
+        load_dotenv()
+        db_path = os.getenv("RECEIPT_DB_PATH", "./data/receipts.sqlite")
+        try:
+            engine = create_engine_and_init(db_path)
+            payload = get_schema_summary(engine)
+        except ValueError as exc:
+            payload = error_payload("INVALID_ARGUMENTS", str(exc))
+        except Exception as exc:
+            payload = error_payload("DB_READ_FAILED", f"Failed to load schema: {exc}")
+        _emit_json(payload, args.output_path)
+    elif args.command == "describe":
+        load_dotenv()
+        db_path = os.getenv("RECEIPT_DB_PATH", "./data/receipts.sqlite")
+        try:
+            engine = create_engine_and_init(db_path)
+            payload = describe_table(engine, args.table)
+        except ValueError as exc:
+            payload = error_payload("INVALID_ARGUMENTS", str(exc))
+        except Exception as exc:
+            payload = error_payload("DB_READ_FAILED", f"Failed to describe table: {exc}")
+        _emit_json(payload, args.output_path)
+    elif args.command == "sample":
+        load_dotenv()
+        db_path = os.getenv("RECEIPT_DB_PATH", "./data/receipts.sqlite")
+        try:
+            create_engine_and_init(db_path)
+            payload = sample_table(db_path, args.table, limit=args.limit)
+        except ValueError as exc:
+            payload = error_payload("INVALID_ARGUMENTS", str(exc))
+        except Exception as exc:
+            payload = error_payload("DB_READ_FAILED", f"Failed to sample table: {exc}")
+        _emit_json(payload, args.output_path)
     else:  # pragma: no cover
         payload = error_payload("INVALID_ARGUMENTS", "Unknown command")
         _emit_json(payload, args.output_path)
@@ -286,16 +368,16 @@ def _render_list_receipts_text(payload: dict) -> str:
 def _render_show_markdown(payload: dict) -> str:
     receipt = payload.get("receipt", {})
     lines = [
-        "*Receipt*",
-        f"*Receipt ID:* `{_md(payload.get('rid'))}`",
-        f"*Store:* {_md(receipt.get('store'))}",
-        f"*Address:* {_md(receipt.get('addr'))}",
-        f"*Transaction Date:* `{_md(receipt.get('tx_date'))}`",
-        f"*Transaction Time:* `{_md(receipt.get('tx_time'))}`",
-        f"*Currency:* `{_md(receipt.get('cur'))}`",
-        f"*Total:* `{_md(_fmt_money(receipt.get('total')))}`",
+        "*🧾 Receipt*",
+        f"*🆔 Receipt ID:* `{_md(payload.get('rid'))}`",
+        f"*🏬 Store:* {_md(receipt.get('store'))}",
+        f"*📍 Address:* {_md(receipt.get('addr'))}",
+        f"*📅 Transaction Date:* `{_md(receipt.get('tx_date'))}`",
+        f"*⏰ Transaction Time:* `{_md(receipt.get('tx_time'))}`",
+        f"*💱 Currency:* `{_md(receipt.get('cur'))}`",
+        f"*💰 Total:* `{_md(_fmt_money(receipt.get('total')))}`",
         "",
-        "*Items*",
+        "*🛒 Items*",
     ]
 
     items = payload.get("items", [])
@@ -306,10 +388,10 @@ def _render_show_markdown(payload: dict) -> str:
 
     adjustments = payload.get("adj", [])
     if adjustments:
-        lines.extend(["", "*Adjustments*", "```", *_render_receipt_adjustment_lines(adjustments), "```"])
+        lines.extend(["", "*💸 Adjustments*", "```", *_render_receipt_adjustment_lines(adjustments), "```"])
 
     if "raw_text" in payload:
-        lines.extend(["", "*Raw Text*", f"```\n{_md(payload.get('raw_text'))}\n```"])
+        lines.extend(["", "*📄 Raw Text*", f"```\n{_md(payload.get('raw_text'))}\n```"])
 
     return "\n".join(lines)
 
@@ -318,9 +400,9 @@ def _render_list_receipts_markdown(payload: dict) -> str:
     month = payload.get("filter", {}).get("month", "")
     receipts_payload = payload.get("receipts", [])
     lines = [
-        "*Receipts*",
-        f"*Month:* `{_md(month)}`",
-        f"*Count:* `{_md(payload.get('count', 0))}`",
+        "*🧾 Receipts*",
+        f"*📅 Month:* `{_md(month)}`",
+        f"*🔢 Count:* `{_md(payload.get('count', 0))}`",
         "",
     ]
     if not receipts_payload:

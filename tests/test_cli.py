@@ -105,6 +105,38 @@ def test_cli_list_receipts_rejects_invalid_month() -> None:
         parser.parse_args(["list-receipts", "--month", "2026-13"])
 
 
+def test_cli_sql_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["sql", "--query", "SELECT rid FROM receipts", "--output", "out.json"])
+    assert args.command == "sql"
+    assert args.query == "SELECT rid FROM receipts"
+    assert args.output_path == "out.json"
+
+
+def test_cli_schema_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["schema", "--output", "out.json"])
+    assert args.command == "schema"
+    assert args.output_path == "out.json"
+
+
+def test_cli_describe_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["describe", "receipts", "--output", "out.json"])
+    assert args.command == "describe"
+    assert args.table == "receipts"
+    assert args.output_path == "out.json"
+
+
+def test_cli_sample_parses_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["sample", "receipts", "--limit", "10", "--output", "out.json"])
+    assert args.command == "sample"
+    assert args.table == "receipts"
+    assert args.limit == 10
+    assert args.output_path == "out.json"
+
+
 def test_cli_main_show_text_output(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "load_dotenv", lambda: None)
     monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
@@ -206,11 +238,11 @@ def test_cli_main_show_markdown_output(monkeypatch, capsys) -> None:
 
     cli.main()
     out = capsys.readouterr().out
-    assert "*Receipt*" in out
-    assert "*Address:* Main & Street" in out
+    assert "*🧾 Receipt*" in out
+    assert "*📍 Address:* Main & Street" in out
     assert "K-City<market>" in out
     assert "maito & kerma" in out
-    assert "*Adjustments*" in out
+    assert "*💸 Adjustments*" in out
     assert "```" in out
     assert "A&B <raw>" in out
     assert not out.lstrip().startswith("{")
@@ -309,8 +341,82 @@ def test_cli_main_list_receipts_markdown_output(monkeypatch, capsys) -> None:
 
     cli.main()
     out = capsys.readouterr().out
-    assert "*Receipts*" in out
-    assert "*Month:* `2026-03`" in out
+    assert "*🧾 Receipts*" in out
+    assert "*📅 Month:* `2026-03`" in out
     assert "K-City<market>" in out
     assert "abc-123" in out
     assert not out.lstrip().startswith("{")
+
+
+def test_cli_main_sql_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(
+        cli,
+        "execute_readonly_sql",
+        lambda *_args, **_kwargs: {
+            "status": "ok",
+            "columns": ["rid"],
+            "rows": [["abc-123"]],
+            "meta": {"row_count": 1, "truncated": False, "limit_applied": 5000, "execution_ms": 1},
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "sql", "--query", "SELECT rid FROM receipts"])
+
+    cli.main()
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("{")
+    assert '"columns": ["rid"]' in out
+
+
+def test_cli_main_schema_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(
+        cli,
+        "get_schema_summary",
+        lambda *_args, **_kwargs: {"status": "ok", "tables": [{"name": "receipts", "columns": []}]},
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "schema"])
+
+    cli.main()
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("{")
+    assert '"tables"' in out
+
+
+def test_cli_main_describe_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(
+        cli,
+        "describe_table",
+        lambda *_args, **_kwargs: {"status": "ok", "table": {"name": "receipts", "columns": []}},
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "describe", "receipts"])
+
+    cli.main()
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("{")
+    assert '"table"' in out
+
+
+def test_cli_main_sample_output(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "load_dotenv", lambda: None)
+    monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
+    monkeypatch.setattr(
+        cli,
+        "sample_table",
+        lambda *_args, **_kwargs: {
+            "status": "ok",
+            "columns": ["rid"],
+            "rows": [["abc-123"]],
+            "meta": {"row_count": 1, "truncated": False, "limit_applied": 5, "execution_ms": 1},
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["receipt-processor", "sample", "receipts"])
+
+    cli.main()
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("{")
+    assert '"rows"' in out
