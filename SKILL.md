@@ -1,5 +1,5 @@
 ---
-name: receipt-processor-cli
+name: receipt-processor
 description: Process Finnish grocery receipt PDFs and inspect persisted results through the local receipt-processor CLI. Use when a user wants to parse receipt files into JSON, troubleshoot extraction/parsing mismatches, validate totals, or query a stored receipt by receipt id (rid). Trigger for requests mentioning to process a receipt file, or to query the contents of the a receipt given its receipt id, or the most recent one.
 ---
 
@@ -29,6 +29,19 @@ When the user provides a receipt file:
 4. If the user references a file name only, locate it first (`rg --files | rg "<name>"`) before running `process`.
 
 `--input` requires a filesystem path, not raw PDF bytes in prompt text.
+
+## OpenClaw Wiring
+
+- Trigger conditions for this skill:
+  - User explicitly invokes `/receipt-processor` command in Telegram or other OpenClaw interfaces.
+  - User asks to process a receipt PDF, e.g., "please process this receipt" or "can you process the attached receipt file?".
+  - User asks to show a stored receipt by `rid` (unlikely, since it's a technical identifier) or the latest receipt.
+- Invocation style:
+  - The agent should run the dedicated CLI commands (`receipt-processor process ...` and `receipt-processor show ...`), not rely on a separate tool API.
+- Attachments flow (including Telegram):
+  - User sends a PDF in Telegram.
+  - OpenClaw downloads the attachment to a local file path.
+  - The agent uses that downloaded local path as `--input <pdf-path>`.
 
 ## Output Contract
 
@@ -81,6 +94,16 @@ Set environment before running:
 - `OPENAI_API_KEY` (required for `process`)
 - Optional: `OPENAI_BASE_URL`
 - Optional DB/runtime vars: `RECEIPT_DB_PATH`, `RECEIPT_DEFAULT_CURRENCY`, `RECEIPT_PARSER_MODEL`, `RECEIPT_ENRICH_MODEL`, `RECEIPT_TIMEOUT_SECONDS`
+
+### Required Secrets and Config
+
+- `OPENAI_API_KEY` can be provided in either place:
+  - OpenClaw gateway/service environment variables (recommended for deployed/shared execution)
+  - Local repo `.env` file (recommended for local development)
+- There is no separate config file for secrets in this project.
+- Resolution order for runtime values is:
+  - existing process environment first
+  - then `.env` loaded by `python-dotenv` for missing values
 
 Default model intent in current code:
 
