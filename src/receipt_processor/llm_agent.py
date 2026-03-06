@@ -12,6 +12,18 @@ class ParseError(RuntimeError):
     """Raised when LLM parsing fails."""
 
 
+def _supports_sampling_params(model: str) -> bool:
+    normalized = model.strip().lower()
+    # Reasoning model families (e.g. o1/o3/o4) reject sampling params.
+    return not normalized.startswith(("o1", "o3", "o4"))
+
+
+def _model_settings_for(model: str) -> ModelSettings | None:
+    if _supports_sampling_params(model):
+        return ModelSettings(temperature=0, top_p=1.0)
+    return None
+
+
 def _build_instructions() -> str:
     return (
         "You parse Finnish grocery receipts into strict structured data using compact keys. "
@@ -41,13 +53,18 @@ def parse_receipt_with_llm(
         if settings.openai_base_url:
             os.environ["OPENAI_BASE_URL"] = settings.openai_base_url
 
+        agent_kwargs = {
+            "name": "finnish_receipt_parser",
+            "instructions": _build_instructions(),
+            "model": settings.parser_model,
+            "output_type": LLMParseResult,
+        }
+        model_settings = _model_settings_for(settings.parser_model)
+        if model_settings is not None:
+            agent_kwargs["model_settings"] = model_settings
+
         parser_agent = Agent(
-            name="finnish_receipt_parser",
-            instructions=_build_instructions(),
-            model=settings.parser_model,
-            # Note: some reasoning models (e.g. o3) reject sampling params like temperature.
-            # Keep model settings unset for maximum compatibility unless we add per-model logic.
-            output_type=LLMParseResult,
+            **agent_kwargs,
         )
 
         input_text = (
