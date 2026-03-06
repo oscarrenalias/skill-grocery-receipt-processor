@@ -7,6 +7,46 @@ description: Process Finnish grocery receipt PDFs and inspect persisted results 
 
 Use the existing CLI implementation exactly as shipped in this repository.
 
+## Installation (repo-based, no ClawHub)
+
+This skill is intended to be used directly from this git repo.
+
+Recommended location on an OpenClaw host:
+
+- `~/.openclaw/workspace/skills/skill-grocery-receipt-processor/`
+
+Quick install:
+
+```bash
+cd ~/.openclaw/workspace/skills
+git clone https://github.com/oscarrenalias/skill-grocery-receipt-processor.git
+cd skill-grocery-receipt-processor
+```
+
+### Dependency bootstrap (uv-first)
+
+This repo uses `uv` for reproducible installs (`uv.lock`).
+
+```bash
+# from repo root
+uv sync
+```
+
+If `uv` is not installed, install it first (see https://docs.astral.sh/uv/).
+
+### Optional fallback (venv + pip)
+
+If you don’t want to require `uv`, you can use a standard venv instead:
+
+```bash
+# from repo root
+python -m venv .venv
+. .venv/bin/activate
+pip install -e .
+```
+
+Then run the CLI via `receipt-processor ...` (or keep using `uv run ...`).
+
 ## Run Commands
 
 Run from repo root:
@@ -21,14 +61,21 @@ Use `show` to read one persisted receipt record (or the latest one).
 
 ## File Input In OpenClaw
 
-When the user provides a receipt file:
+When the user provides a receipt file (for example a Telegram attachment):
 
-1. Ensure the file exists on local disk in the workspace.
+1. Ensure the attachment exists on local disk.
 2. Pass its local path directly to `--input`.
-3. Prefer a stable relative path (for example `samples/<name>.pdf`) when copying files into the repo.
+3. Prefer copying the inbound file into a stable repo-relative path (for example `samples/<name>.pdf`) before running `process`.
 4. If the user references a file name only, locate it first (`rg --files | rg "<name>"`) before running `process`.
 
-`--input` requires a filesystem path, not raw PDF bytes in prompt text.
+Notes:
+
+- OpenClaw typically represents inbound attachments as a local file path such as:
+  - `/home/admin/.openclaw/media/inbound/<filename>.pdf`
+- `--input` requires a filesystem path, not raw PDF bytes in prompt text.
+- If multiple attachments are provided:
+  - Prefer the first PDF.
+  - If there are multiple PDFs and the user didn’t specify which, ask which one to process.
 
 ## OpenClaw Wiring
 
