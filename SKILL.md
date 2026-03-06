@@ -92,6 +92,11 @@ Notes:
 
 ## Output Contract
 
+User-facing reply guidance:
+
+- Do **not** include local filesystem paths in chat replies (they are implementation detail and confuse users).
+- Instead say: "I can provide you with the full itemized receipt—just ask." and present the parsed results.
+
 `process` always prints JSON to stdout.  
 `show` prints plain text by default and JSON when `--format json` is set.
 
