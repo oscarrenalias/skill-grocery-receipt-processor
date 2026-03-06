@@ -17,3 +17,6 @@ wheels/
 
 # Keep sample dir structure but ignore sample binaries/docs
 samples/*.pdf
+
+# Local database files
+data/*.sqlite
