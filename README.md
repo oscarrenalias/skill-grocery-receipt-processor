@@ -43,6 +43,7 @@ Parameters:
 
 - `process --input <path>` Process a receipt PDF.
 - `process --persist` Persist to SQLite.
+  - Duplicate uploads are detected automatically (by file hash and normalized extracted-text hash) and return `status="duplicate"` with the existing `rid`.
 - `process --debug` Enable debug behavior.
 - `show-receipt --rid <id>` Load persisted receipt by id.
 - `show-receipt --latest` Load the latest persisted receipt by transaction date/time.
@@ -76,7 +77,7 @@ Parameters:
 
 Top-level success keys:
 
-- `status`, `rid`, `store`, `tx_date`, `total`, `n_items`, `n_adj`, `warn`
+- `status`, `rid`, `store`, `tx_date`, `total`, `n_items`, `n_adj`, `warn`, `dup_match` (for `status="duplicate"`)
 
 Top-level error keys:
 

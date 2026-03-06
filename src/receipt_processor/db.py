@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     create_engine,
     insert,
+    func,
     select,
     text,
 )
@@ -32,6 +33,7 @@ receipts = Table(
     metadata,
     Column("rid", String, primary_key=True),
     Column("doc_hash", String, nullable=False, unique=True),
+    Column("text_hash", String, nullable=True),
     Column("src", String, nullable=False),
     Column("store", String, nullable=False),
     Column("addr", String, nullable=False),
@@ -87,6 +89,7 @@ receipt_adjustments = Table(
 )
 
 Index("idx_receipts_date_store", receipts.c.tx_date, receipts.c.store)
+Index("idx_receipts_text_hash", receipts.c.text_hash)
 
 
 class PersistenceError(RuntimeError):
@@ -109,127 +112,132 @@ def _table_columns(conn: Connection, table_name: str) -> set[str]:
 
 def _migrate_legacy_schema(conn: Connection) -> None:
     receipt_cols = _table_columns(conn, "receipts")
-    if not receipt_cols or "receipt_id" not in receipt_cols:
-        return
+    if receipt_cols and "receipt_id" in receipt_cols:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
 
-    conn.execute(text("PRAGMA foreign_keys=OFF"))
-
-    conn.execute(
-        text(
-            """
-            CREATE TABLE receipts_v2 (
-                rid TEXT PRIMARY KEY,
-                doc_hash TEXT NOT NULL UNIQUE,
-                src TEXT NOT NULL,
-                store TEXT NOT NULL,
-                addr TEXT NOT NULL,
-                tx_date TEXT NOT NULL,
-                tx_time TEXT NOT NULL,
-                cur TEXT NOT NULL,
-                total REAL NOT NULL,
-                raw_text TEXT NOT NULL,
-                raw_payload TEXT NOT NULL,
-                extract TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL
+        conn.execute(
+            text(
+                """
+                CREATE TABLE receipts_v2 (
+                    rid TEXT PRIMARY KEY,
+                    doc_hash TEXT NOT NULL UNIQUE,
+                    text_hash TEXT,
+                    src TEXT NOT NULL,
+                    store TEXT NOT NULL,
+                    addr TEXT NOT NULL,
+                    tx_date TEXT NOT NULL,
+                    tx_time TEXT NOT NULL,
+                    cur TEXT NOT NULL,
+                    total REAL NOT NULL,
+                    raw_text TEXT NOT NULL,
+                    raw_payload TEXT NOT NULL,
+                    extract TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
             )
-            """
         )
-    )
-    conn.execute(
-        text(
-            """
-            INSERT INTO receipts_v2
-            (rid, doc_hash, src, store, addr, tx_date, tx_time, cur, total, raw_text, raw_payload, extract, status, created_at)
-            SELECT receipt_id, document_hash, source_file, store_name, store_address, transaction_date, transaction_time,
-                   currency, reported_total_eur, raw_text, raw_payload, extraction_method, status, created_at
-            FROM receipts
-            """
-        )
-    )
-
-    conn.execute(
-        text(
-            """
-            CREATE TABLE receipt_items_v2 (
-                iid INTEGER PRIMARY KEY AUTOINCREMENT,
-                rid TEXT NOT NULL,
-                idx INTEGER NOT NULL,
-                raw TEXT NOT NULL,
-                fi_raw TEXT NOT NULL,
-                fi TEXT NOT NULL,
-                en TEXT NOT NULL,
-                c1 TEXT NOT NULL,
-                c2 TEXT NOT NULL,
-                c3 TEXT NOT NULL,
-                cpath TEXT NOT NULL,
-                qty REAL NOT NULL,
-                utype TEXT NOT NULL,
-                raw_uom TEXT NOT NULL,
-                uom TEXT NOT NULL,
-                uom_qty REAL NOT NULL,
-                unit_price REAL NOT NULL,
-                line_total REAL NOT NULL,
-                loy_disc REAL NOT NULL,
-                loyalty_type TEXT NOT NULL,
-                is_weighted BOOLEAN NOT NULL,
-                is_return BOOLEAN NOT NULL,
-                conf REAL NOT NULL,
-                notes TEXT NOT NULL,
-                FOREIGN KEY(rid) REFERENCES receipts_v2(rid)
+        conn.execute(
+            text(
+                """
+                INSERT INTO receipts_v2
+                (rid, doc_hash, text_hash, src, store, addr, tx_date, tx_time, cur, total, raw_text, raw_payload, extract, status, created_at)
+                SELECT receipt_id, document_hash, NULL, source_file, store_name, store_address, transaction_date, transaction_time,
+                       currency, reported_total_eur, raw_text, raw_payload, extraction_method, status, created_at
+                FROM receipts
+                """
             )
-            """
         )
-    )
-    conn.execute(
-        text(
-            """
-            INSERT INTO receipt_items_v2
-            (rid, idx, raw, fi_raw, fi, en, c1, c2, c3, cpath, qty, utype, raw_uom, uom, uom_qty, unit_price,
-             line_total, loy_disc, loyalty_type, is_weighted, is_return, conf, notes)
-            SELECT receipt_id, line_index, raw_line_text, raw_name_fi, normalized_name_fi, english_name,
-                   category_l1, category_l2, category_l3, category_path, quantity, unit_type, raw_measure_unit,
-                   measure_unit, measure_amount, unit_price_eur, line_total_eur, loyalty_discount_amount_eur,
-                   loyalty_discount_type, is_weighted_item, is_return_or_refund, confidence, parser_notes
-            FROM receipt_items
-            """
-        )
-    )
 
-    conn.execute(
-        text(
-            """
-            CREATE TABLE receipt_adjustments_v2 (
-                aid INTEGER PRIMARY KEY AUTOINCREMENT,
-                rid TEXT NOT NULL,
-                type TEXT NOT NULL,
-                raw TEXT NOT NULL,
-                amt REAL NOT NULL,
-                item_idx INTEGER,
-                FOREIGN KEY(rid) REFERENCES receipts_v2(rid)
+        conn.execute(
+            text(
+                """
+                CREATE TABLE receipt_items_v2 (
+                    iid INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rid TEXT NOT NULL,
+                    idx INTEGER NOT NULL,
+                    raw TEXT NOT NULL,
+                    fi_raw TEXT NOT NULL,
+                    fi TEXT NOT NULL,
+                    en TEXT NOT NULL,
+                    c1 TEXT NOT NULL,
+                    c2 TEXT NOT NULL,
+                    c3 TEXT NOT NULL,
+                    cpath TEXT NOT NULL,
+                    qty REAL NOT NULL,
+                    utype TEXT NOT NULL,
+                    raw_uom TEXT NOT NULL,
+                    uom TEXT NOT NULL,
+                    uom_qty REAL NOT NULL,
+                    unit_price REAL NOT NULL,
+                    line_total REAL NOT NULL,
+                    loy_disc REAL NOT NULL,
+                    loyalty_type TEXT NOT NULL,
+                    is_weighted BOOLEAN NOT NULL,
+                    is_return BOOLEAN NOT NULL,
+                    conf REAL NOT NULL,
+                    notes TEXT NOT NULL,
+                    FOREIGN KEY(rid) REFERENCES receipts_v2(rid)
+                )
+                """
             )
-            """
         )
-    )
-    conn.execute(
-        text(
-            """
-            INSERT INTO receipt_adjustments_v2
-            (rid, type, raw, amt, item_idx)
-            SELECT receipt_id, type, raw_text, amount_eur, applies_to_item_id
-            FROM receipt_adjustments
-            """
+        conn.execute(
+            text(
+                """
+                INSERT INTO receipt_items_v2
+                (rid, idx, raw, fi_raw, fi, en, c1, c2, c3, cpath, qty, utype, raw_uom, uom, uom_qty, unit_price,
+                 line_total, loy_disc, loyalty_type, is_weighted, is_return, conf, notes)
+                SELECT receipt_id, line_index, raw_line_text, raw_name_fi, normalized_name_fi, english_name,
+                       category_l1, category_l2, category_l3, category_path, quantity, unit_type, raw_measure_unit,
+                       measure_unit, measure_amount, unit_price_eur, line_total_eur, loyalty_discount_amount_eur,
+                       loyalty_discount_type, is_weighted_item, is_return_or_refund, confidence, parser_notes
+                FROM receipt_items
+                """
+            )
         )
-    )
 
-    conn.execute(text("DROP TABLE receipt_adjustments"))
-    conn.execute(text("DROP TABLE receipt_items"))
-    conn.execute(text("DROP TABLE receipts"))
-    conn.execute(text("ALTER TABLE receipts_v2 RENAME TO receipts"))
-    conn.execute(text("ALTER TABLE receipt_items_v2 RENAME TO receipt_items"))
-    conn.execute(text("ALTER TABLE receipt_adjustments_v2 RENAME TO receipt_adjustments"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_receipts_date_store ON receipts(tx_date, store)"))
-    conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE receipt_adjustments_v2 (
+                    aid INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rid TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    raw TEXT NOT NULL,
+                    amt REAL NOT NULL,
+                    item_idx INTEGER,
+                    FOREIGN KEY(rid) REFERENCES receipts_v2(rid)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO receipt_adjustments_v2
+                (rid, type, raw, amt, item_idx)
+                SELECT receipt_id, type, raw_text, amount_eur, applies_to_item_id
+                FROM receipt_adjustments
+                """
+            )
+        )
+
+        conn.execute(text("DROP TABLE receipt_adjustments"))
+        conn.execute(text("DROP TABLE receipt_items"))
+        conn.execute(text("DROP TABLE receipts"))
+        conn.execute(text("ALTER TABLE receipts_v2 RENAME TO receipts"))
+        conn.execute(text("ALTER TABLE receipt_items_v2 RENAME TO receipt_items"))
+        conn.execute(text("ALTER TABLE receipt_adjustments_v2 RENAME TO receipt_adjustments"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_receipts_date_store ON receipts(tx_date, store)"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+
+    updated_cols = _table_columns(conn, "receipts")
+    if updated_cols:
+        if "text_hash" not in updated_cols:
+            conn.execute(text("ALTER TABLE receipts ADD COLUMN text_hash TEXT"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_receipts_text_hash ON receipts(text_hash)"))
 
 
 def get_receipt_id_by_hash(engine: Engine, document_hash: str) -> str | None:
@@ -242,6 +250,7 @@ def persist_result(
     engine: Engine,
     *,
     document_hash: str,
+    text_hash: str | None,
     source_file: str,
     raw_text: str,
     extraction_method: str,
@@ -261,6 +270,7 @@ def persist_result(
                 insert(receipts).values(
                     rid=rid,
                     doc_hash=document_hash,
+                    text_hash=text_hash,
                     src=source_file,
                     store=parse_result.receipt.store,
                     addr=parse_result.receipt.addr,
@@ -325,6 +335,53 @@ def persist_result(
         raise PersistenceError(f"Failed to persist receipt: {exc}") from exc
 
     return rid
+
+
+def find_duplicate_receipt(engine: Engine, *, document_hash: str, text_hash: str | None) -> dict | None:
+    with engine.connect() as conn:
+        doc_row = conn.execute(
+            select(
+                receipts.c.rid,
+                receipts.c.store,
+                receipts.c.tx_date,
+                receipts.c.total,
+            ).where(receipts.c.doc_hash == document_hash)
+        ).first()
+        if doc_row:
+            return _build_duplicate_match_payload(conn, doc_row._mapping, "doc_hash")
+
+        if text_hash:
+            text_row = conn.execute(
+                select(
+                    receipts.c.rid,
+                    receipts.c.store,
+                    receipts.c.tx_date,
+                    receipts.c.total,
+                ).where(receipts.c.text_hash == text_hash)
+            ).first()
+            if text_row:
+                return _build_duplicate_match_payload(conn, text_row._mapping, "text_hash")
+    return None
+
+
+def _build_duplicate_match_payload(conn: Connection, receipt_map: dict, dup_match: str) -> dict:
+    rid = str(receipt_map["rid"])
+    n_items = int(
+        conn.execute(select(func.count()).select_from(receipt_items).where(receipt_items.c.rid == rid)).scalar_one()
+    )
+    n_adj = int(
+        conn.execute(select(func.count()).select_from(receipt_adjustments).where(receipt_adjustments.c.rid == rid)).scalar_one()
+    )
+    return {
+        "status": "duplicate",
+        "rid": rid,
+        "store": receipt_map["store"],
+        "tx_date": receipt_map["tx_date"],
+        "total": receipt_map["total"],
+        "n_items": n_items,
+        "n_adj": n_adj,
+        "dup_match": dup_match,
+    }
 
 
 def get_receipt_dump_by_id(engine: Engine, rid: str, include_raw_text: bool = False) -> dict | None:

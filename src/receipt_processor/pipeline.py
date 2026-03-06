@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+import unicodedata
 from pathlib import Path
 
 from receipt_processor.config import Settings
-from receipt_processor.db import create_engine_and_init, persist_result
+from receipt_processor.db import create_engine_and_init, find_duplicate_receipt, persist_result
 from receipt_processor.errors import error_payload
 from receipt_processor.llm_agent import ParseError, parse_receipt_with_llm
 from receipt_processor.pdf_extract import TextExtractionError, extract_text_from_pdf
@@ -38,6 +39,32 @@ def process_receipt(
         return error_payload("TEXT_EXTRACTION_FAILED", str(exc))
 
     extraction_warn = _check_extracted_text(raw_text)
+    text_hash = compute_text_hash(raw_text)
+
+    if persist:
+        try:
+            engine = create_engine_and_init(settings.db_path)
+            duplicate_payload = find_duplicate_receipt(
+                engine,
+                document_hash=document_hash,
+                text_hash=text_hash,
+            )
+            if duplicate_payload:
+                warn = extraction_warn + [f"Duplicate receipt detected by {duplicate_payload['dup_match']}"]
+                out = ProcessSuccess(
+                    status="duplicate",
+                    rid=duplicate_payload["rid"],
+                    store=duplicate_payload["store"],
+                    tx_date=duplicate_payload["tx_date"],
+                    total=duplicate_payload["total"],
+                    n_items=int(duplicate_payload["n_items"]),
+                    n_adj=int(duplicate_payload["n_adj"]),
+                    dup_match=duplicate_payload["dup_match"],
+                    warn=warn,
+                )
+                return compact_dump(out)
+        except Exception as exc:
+            return error_payload("DB_READ_FAILED", f"Failed to check duplicate receipt: {exc}")
 
     try:
         parse_result = parse_receipt_with_llm(raw_text, settings=settings, debug=debug)
@@ -56,11 +83,11 @@ def process_receipt(
     rid = str(uuid.uuid4())
     if persist:
         try:
-            engine = create_engine_and_init(settings.db_path)
             db_status = "partial" if is_partial else "ok"
             rid = persist_result(
                 engine,
                 document_hash=document_hash,
+                text_hash=text_hash,
                 source_file=source,
                 raw_text=raw_text,
                 extraction_method="pypdf-native-text",
@@ -113,3 +140,14 @@ def _check_extracted_text(raw_text: str) -> list[str]:
 
 def empty_parse_result() -> LLMParseResult:
     return LLMParseResult.model_validate({"receipt": {}})
+
+
+def compute_text_hash(raw_text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", raw_text)
+    normalized_lines: list[str] = []
+    for line in normalized.splitlines():
+        cleaned = " ".join(line.strip().split())
+        if cleaned:
+            normalized_lines.append(cleaned)
+    canonical_text = "\n".join(normalized_lines).casefold()
+    return hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()

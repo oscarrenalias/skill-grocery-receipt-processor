@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 from types import SimpleNamespace
 
@@ -5,12 +6,13 @@ from sqlalchemy import insert
 
 from receipt_processor.db import (
     create_engine_and_init,
+    find_duplicate_receipt,
     get_latest_receipt_dump,
     get_receipt_dump_by_id,
     list_receipt_summaries_by_month,
     receipts,
 )
-from receipt_processor.pipeline import process_receipt
+from receipt_processor.pipeline import compute_text_hash, process_receipt
 from receipt_processor.schemas import LLMParseResult
 
 class DummySettings:
@@ -196,8 +198,15 @@ def test_get_latest_receipt_dump_orders_by_tx_date_and_time(monkeypatch, tmp_pat
             _parse("2026-03-03", "08:05"),
         ]
     )
+    extracted_texts = iter(
+        [
+            "K-Market\nYHTEENSA\n2,90\nA",
+            "K-Market\nYHTEENSA\n2,90\nB",
+            "K-Market\nYHTEENSA\n2,90\nC",
+        ]
+    )
 
-    monkeypatch.setattr("receipt_processor.pipeline.extract_text_from_pdf", lambda _: "K-Market\nYHTEENSA\n2,90")
+    monkeypatch.setattr("receipt_processor.pipeline.extract_text_from_pdf", lambda _: next(extracted_texts))
     monkeypatch.setattr("receipt_processor.pipeline.parse_receipt_with_llm", lambda *args, **kwargs: next(parse_results))
 
     process_receipt(input_path=str(pdf_a), persist=True, debug=False, settings=settings)
@@ -308,3 +317,220 @@ def test_list_receipt_summaries_by_month_filters_and_orders(tmp_path) -> None:
 
     march = list_receipt_summaries_by_month(engine, "2026-03")
     assert [row["rid"] for row in march] == ["r-3"]
+
+
+def test_process_receipt_persist_duplicate_by_doc_hash_short_circuits_parse(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "receipts.sqlite"
+    pdf = tmp_path / "receipt.pdf"
+    pdf_bytes = b"same-pdf-content"
+    pdf.write_bytes(pdf_bytes)
+    raw_text = "K-Market\nYHTEENSA\n2,90"
+    engine = create_engine_and_init(str(db_path))
+
+    with engine.begin() as conn:
+        conn.execute(
+            insert(receipts),
+            [
+                {
+                    "rid": "existing-rid",
+                    "doc_hash": hashlib.sha256(pdf_bytes).hexdigest(),
+                    "text_hash": compute_text_hash(raw_text),
+                    "src": "existing.pdf",
+                    "store": "K-Citymarket",
+                    "addr": "",
+                    "tx_date": "2026-03-01",
+                    "tx_time": "10:00",
+                    "cur": "EUR",
+                    "total": 2.9,
+                    "raw_text": raw_text,
+                    "raw_payload": "{}",
+                    "extract": "seed",
+                    "status": "ok",
+                    "created_at": "2026-03-06T12:00:00+00:00",
+                }
+            ],
+        )
+
+    settings = SimpleNamespace(db_path=str(db_path))
+    monkeypatch.setattr("receipt_processor.pipeline.extract_text_from_pdf", lambda _: raw_text)
+
+    def _fail_parse(*_args, **_kwargs):
+        raise AssertionError("parse_receipt_with_llm should not be called for duplicate")
+
+    monkeypatch.setattr("receipt_processor.pipeline.parse_receipt_with_llm", _fail_parse)
+
+    payload = process_receipt(
+        input_path=str(pdf),
+        persist=True,
+        debug=False,
+        settings=settings,
+    )
+
+    assert payload["status"] == "duplicate"
+    assert payload["rid"] == "existing-rid"
+    assert payload["dup_match"] == "doc_hash"
+
+
+def test_process_receipt_persist_duplicate_by_text_hash_short_circuits_parse(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "receipts.sqlite"
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(b"different-pdf-content")
+    raw_text = "K-Market\nYHTEENSA\n2,90"
+    engine = create_engine_and_init(str(db_path))
+
+    with engine.begin() as conn:
+        conn.execute(
+            insert(receipts),
+            [
+                {
+                    "rid": "existing-rid-text",
+                    "doc_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "text_hash": compute_text_hash(raw_text),
+                    "src": "existing.pdf",
+                    "store": "K-Citymarket",
+                    "addr": "",
+                    "tx_date": "2026-03-01",
+                    "tx_time": "10:00",
+                    "cur": "EUR",
+                    "total": 2.9,
+                    "raw_text": raw_text,
+                    "raw_payload": "{}",
+                    "extract": "seed",
+                    "status": "ok",
+                    "created_at": "2026-03-06T12:00:00+00:00",
+                }
+            ],
+        )
+
+    settings = SimpleNamespace(db_path=str(db_path))
+    monkeypatch.setattr("receipt_processor.pipeline.extract_text_from_pdf", lambda _: raw_text)
+
+    def _fail_parse(*_args, **_kwargs):
+        raise AssertionError("parse_receipt_with_llm should not be called for duplicate")
+
+    monkeypatch.setattr("receipt_processor.pipeline.parse_receipt_with_llm", _fail_parse)
+
+    payload = process_receipt(
+        input_path=str(pdf),
+        persist=True,
+        debug=False,
+        settings=settings,
+    )
+
+    assert payload["status"] == "duplicate"
+    assert payload["rid"] == "existing-rid-text"
+    assert payload["dup_match"] == "text_hash"
+
+
+def test_create_engine_adds_text_hash_column_for_existing_schema(tmp_path) -> None:
+    db_path = tmp_path / "legacy.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE receipts (
+                rid TEXT PRIMARY KEY,
+                doc_hash TEXT NOT NULL UNIQUE,
+                src TEXT NOT NULL,
+                store TEXT NOT NULL,
+                addr TEXT NOT NULL,
+                tx_date TEXT NOT NULL,
+                tx_time TEXT NOT NULL,
+                cur TEXT NOT NULL,
+                total REAL NOT NULL,
+                raw_text TEXT NOT NULL,
+                raw_payload TEXT NOT NULL,
+                extract TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE receipt_items (
+                iid INTEGER PRIMARY KEY AUTOINCREMENT,
+                rid TEXT NOT NULL,
+                idx INTEGER NOT NULL,
+                raw TEXT NOT NULL,
+                fi_raw TEXT NOT NULL,
+                fi TEXT NOT NULL,
+                en TEXT NOT NULL,
+                c1 TEXT NOT NULL,
+                c2 TEXT NOT NULL,
+                c3 TEXT NOT NULL,
+                cpath TEXT NOT NULL,
+                qty REAL NOT NULL,
+                utype TEXT NOT NULL,
+                raw_uom TEXT NOT NULL,
+                uom TEXT NOT NULL,
+                uom_qty REAL NOT NULL,
+                unit_price REAL NOT NULL,
+                line_total REAL NOT NULL,
+                loy_disc REAL NOT NULL,
+                loyalty_type TEXT NOT NULL,
+                is_weighted BOOLEAN NOT NULL,
+                is_return BOOLEAN NOT NULL,
+                conf REAL NOT NULL,
+                notes TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE receipt_adjustments (
+                aid INTEGER PRIMARY KEY AUTOINCREMENT,
+                rid TEXT NOT NULL,
+                type TEXT NOT NULL,
+                raw TEXT NOT NULL,
+                amt REAL NOT NULL,
+                item_idx INTEGER
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    create_engine_and_init(str(db_path))
+    verify = sqlite3.connect(db_path)
+    try:
+        receipt_cols = {row[1] for row in verify.execute("PRAGMA table_info(receipts)").fetchall()}
+        assert "text_hash" in receipt_cols
+        indexes = [row[1] for row in verify.execute("PRAGMA index_list(receipts)").fetchall()]
+        assert "idx_receipts_text_hash" in indexes
+    finally:
+        verify.close()
+
+
+def test_find_duplicate_receipt_prefers_doc_hash(tmp_path) -> None:
+    db_path = tmp_path / "receipts.sqlite"
+    engine = create_engine_and_init(str(db_path))
+    with engine.begin() as conn:
+        conn.execute(
+            insert(receipts),
+            [
+                {
+                    "rid": "dup-rid",
+                    "doc_hash": "doc-dup",
+                    "text_hash": "text-dup",
+                    "src": "seed.pdf",
+                    "store": "K-Citymarket",
+                    "addr": "",
+                    "tx_date": "2026-03-01",
+                    "tx_time": "10:00",
+                    "cur": "EUR",
+                    "total": 2.9,
+                    "raw_text": "x",
+                    "raw_payload": "{}",
+                    "extract": "seed",
+                    "status": "ok",
+                    "created_at": "2026-03-06T12:00:00+00:00",
+                }
+            ],
+        )
+
+    found = find_duplicate_receipt(engine, document_hash="doc-dup", text_hash="text-dup")
+    assert found is not None
+    assert found["status"] == "duplicate"
+    assert found["dup_match"] == "doc_hash"

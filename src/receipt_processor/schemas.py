@@ -86,13 +86,14 @@ class LLMParseResult(BaseModel):
 
 
 class ProcessSuccess(BaseModel):
-    status: Literal["ok", "partial"]
+    status: Literal["ok", "partial", "duplicate"]
     rid: str
     store: str
     tx_date: str
     total: float
     n_items: int
     n_adj: int
+    dup_match: Literal["doc_hash", "text_hash"] | None = None
     warn: list[str] = Field(default_factory=list)
 
 

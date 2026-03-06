@@ -102,7 +102,7 @@ User-facing reply guidance:
 
 `process` success shape:
 
-- `status`: `ok` or `partial`
+- `status`: `ok`, `partial`, or `duplicate`
 - `rid`
 - `store`
 - `tx_date`
@@ -110,11 +110,13 @@ User-facing reply guidance:
 - `n_items`
 - `n_adj`
 - `warn`
+- `dup_match` (`doc_hash` or `text_hash`) when `status=duplicate`
 
 `process` detail behavior:
 
 - Include full `receipt`, `items`, and `adj` when `status=partial` or `--debug` is enabled.
 - `ok` responses are compact summary payloads unless `--debug` is set.
+- Duplicate uploads with `--persist` return `status=duplicate` and the existing `rid` without re-parsing.
 
 `show-receipt` success shape:
 
