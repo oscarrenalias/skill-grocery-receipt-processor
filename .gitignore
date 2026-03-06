@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local environment files
+.env
+
+# OS files
+.DS_Store
+
+# Keep sample dir structure but ignore sample binaries/docs
+samples/*.pdf

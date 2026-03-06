@@ -1,0 +1,7 @@
+interface:
+  display_name: "Receipt Processor CLI"
+  short_description: "Parse Finnish grocery receipt PDFs"
+  default_prompt: "Use $receipt-processor-cli to process a receipt PDF and return the structured JSON output."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,28 @@
+[project]
+name = "receipt-processor"
+version = "0.1.0"
+description = "Finnish grocery receipt processor with LLM-first extraction and SQLite persistence"
+readme = "README.md"
+authors = [
+    { name = "Renalias, Oscar", email = "oscar@renalias.net" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "openai-agents>=0.10.5",
+    "pydantic>=2.12.5",
+    "pypdf>=6.7.5",
+    "python-dotenv>=1.2.2",
+    "sqlalchemy>=2.0.48",
+]
+
+[project.scripts]
+receipt-processor = "receipt_processor.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
