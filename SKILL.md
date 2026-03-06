@@ -1,0 +1,95 @@
+---
+name: receipt-processor-cli
+description: Process Finnish grocery receipt PDFs and inspect persisted results through the local receipt-processor CLI. Use when a user wants to parse receipt files into JSON, troubleshoot extraction/parsing mismatches, validate totals, or query a stored receipt by receipt id (rid). Trigger for requests mentioning to process a receipt file, or to query the contents of the a receipt given its receipt id, or the most recent one.
+---
+
+# Receipt Processor CLI Skill
+
+Use the existing CLI implementation exactly as shipped in this repository.
+
+## Run Commands
+
+Run from repo root:
+
+```bash
+uv run receipt-processor process --input <pdf-path> [--persist] [--debug] [--output <json-path>]
+uv run receipt-processor show (--rid <receipt-id> | --latest) [--include-raw-text] [--format text|json] [--output <path>]
+```
+
+Use `process` to parse a receipt PDF.  
+Use `show` to read one persisted receipt record (or the latest one).
+
+## File Input In OpenClaw
+
+When the user provides a receipt file:
+
+1. Ensure the file exists on local disk in the workspace.
+2. Pass its local path directly to `--input`.
+3. Prefer a stable relative path (for example `samples/<name>.pdf`) when copying files into the repo.
+4. If the user references a file name only, locate it first (`rg --files | rg "<name>"`) before running `process`.
+
+`--input` requires a filesystem path, not raw PDF bytes in prompt text.
+
+## Output Contract
+
+`process` always prints JSON to stdout.  
+`show` prints plain text by default and JSON when `--format json` is set.
+
+`process` success shape:
+
+- `status`: `ok` or `partial`
+- `rid`
+- `store`
+- `tx_date`
+- `total`
+- `n_items`
+- `n_adj`
+- `warn`
+
+`process` detail behavior:
+
+- Include full `receipt`, `items`, and `adj` when `status=partial` or `--debug` is enabled.
+- `ok` responses are compact summary payloads unless `--debug` is set.
+
+`show` success shape:
+
+- Persisted receipt payload by `rid` or latest selector (receipt fields, `items`, `adj`).
+- Include stored raw OCR text only when `--include-raw-text` is set.
+
+`show` text mode behavior (`--format text`, default):
+
+- Header fields with descriptive names (for example `Address`, `Transaction Date`).
+- Fixed-width ASCII table for items:
+  - `Item (Finnish) | Unit | Quantity | Unit Price | Line Total`
+- Fixed-width ASCII table for adjustments when present.
+
+Error shape:
+
+- `status: "error"`
+- `err`
+- `msg`
+- optional `receipt`, `items`, `adj`, `warn`
+
+Compact payload behavior:
+
+- Default/empty fields are omitted; consumers must handle missing keys by schema defaults.
+
+## Environment Requirements
+
+Set environment before running:
+
+- `OPENAI_API_KEY` (required for `process`)
+- Optional: `OPENAI_BASE_URL`
+- Optional DB/runtime vars: `RECEIPT_DB_PATH`, `RECEIPT_DEFAULT_CURRENCY`, `RECEIPT_PARSER_MODEL`, `RECEIPT_ENRICH_MODEL`, `RECEIPT_TIMEOUT_SECONDS`
+
+Default model intent in current code:
+
+- parser: `o3`
+- enrich: `gpt-4.1`
+
+## Operational Guidance
+
+1. For normal parsing, run `process` without `--debug`.
+2. For mismatch troubleshooting, rerun with `--debug` to return full item and adjustment arrays.
+3. For durable lookup workflows, run with `--persist`, then use returned `rid` with `show`.
+4. On failures, return the JSON error payload directly and preserve `warn` entries.
