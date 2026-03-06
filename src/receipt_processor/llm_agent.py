@@ -45,7 +45,8 @@ def parse_receipt_with_llm(
             name="finnish_receipt_parser",
             instructions=_build_instructions(),
             model=settings.parser_model,
-            model_settings=ModelSettings(temperature=0, top_p=1.0),
+            # Note: some reasoning models (e.g. o3) reject sampling params like temperature.
+            # Keep model settings unset for maximum compatibility unless we add per-model logic.
             output_type=LLMParseResult,
         )
 
