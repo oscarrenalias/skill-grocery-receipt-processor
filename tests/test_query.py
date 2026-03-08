@@ -1,9 +1,11 @@
 import hashlib
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import insert
 
+from receipt_processor import query as query_module
 from receipt_processor.db import create_engine_and_init, receipts
 from receipt_processor.query import describe_table, execute_readonly_sql, get_schema_summary, sample_table
 
@@ -100,11 +102,16 @@ def test_schema_and_describe(tmp_path) -> None:
     assert schema["status"] == "ok"
     table_names = {table["name"] for table in schema["tables"]}
     assert {"receipts", "receipt_items", "receipt_adjustments"}.issubset(table_names)
+    assert {"item_embedding_meta", "item_embedding_vec"}.issubset(table_names)
 
     desc = describe_table(engine, "receipts")
     assert desc["status"] == "ok"
     col_names = {column["name"] for column in desc["table"]["columns"]}
     assert {"rid", "doc_hash", "text_hash"}.issubset(col_names)
+
+    desc_vec = describe_table(engine, "item_embedding_meta")
+    assert desc_vec["status"] == "ok"
+    assert desc_vec["table"]["name"] == "item_embedding_meta"
 
 
 def test_describe_rejects_unknown_table(tmp_path) -> None:
@@ -132,3 +139,57 @@ def test_sample_table_rejects_invalid_limit(tmp_path) -> None:
     create_engine_and_init(str(db_path))
     with pytest.raises(ValueError):
         sample_table(str(db_path), "receipts", limit=0)
+
+
+def test_execute_readonly_sql_loads_sqlite_vec_for_vector_tables(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "receipts.sqlite"
+    create_engine_and_init(str(db_path))
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE item_embedding_meta (
+                iid INTEGER PRIMARY KEY,
+                model TEXT NOT NULL,
+                dim INTEGER NOT NULL,
+                payload_hash TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO item_embedding_meta(iid, model, dim, payload_hash, updated_at)
+            VALUES (1, 'text-embedding-3-small', 3, 'abc', '2026-03-07T00:00:00+00:00')
+            """
+        )
+        conn.commit()
+
+    loaded = {"count": 0}
+
+    def _fake_load(conn) -> None:
+        _ = conn
+        loaded["count"] += 1
+
+    monkeypatch.setattr(query_module, "_load_sqlite_vec", _fake_load)
+
+    out = execute_readonly_sql(str(db_path), "SELECT iid FROM item_embedding_meta")
+    assert out["rows"] == [[1]]
+    assert loaded["count"] == 1
+
+
+def test_execute_readonly_sql_does_not_load_sqlite_vec_for_domain_tables(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "receipts.sqlite"
+    engine = create_engine_and_init(str(db_path))
+    _seed_receipt(engine, "a")
+
+    loaded = {"count": 0}
+
+    def _fake_load(conn) -> None:
+        _ = conn
+        loaded["count"] += 1
+
+    monkeypatch.setattr(query_module, "_load_sqlite_vec", _fake_load)
+
+    out = execute_readonly_sql(str(db_path), "SELECT rid FROM receipts")
+    assert out["rows"] == [["a"]]
+    assert loaded["count"] == 0

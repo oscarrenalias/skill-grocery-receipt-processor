@@ -15,6 +15,10 @@ class Settings:
     parser_model: str
     enrich_model: str
     timeout_seconds: int
+    embed_model: str
+    embed_batch_size: int
+    embed_dim: int | None
+    embed_timeout_seconds: int
 
 
 class ConfigError(ValueError):
@@ -46,4 +50,8 @@ def load_settings() -> Settings:
         parser_model=os.getenv("RECEIPT_PARSER_MODEL", "o3"),
         enrich_model=os.getenv("RECEIPT_ENRICH_MODEL", "gpt-4.1"),
         timeout_seconds=_as_int("RECEIPT_TIMEOUT_SECONDS", 90),
+        embed_model=os.getenv("RECEIPT_EMBED_MODEL", "text-embedding-3-small"),
+        embed_batch_size=_as_int("RECEIPT_EMBED_BATCH_SIZE", 64),
+        embed_dim=(_as_int("RECEIPT_EMBED_DIM", 1536) if os.getenv("RECEIPT_EMBED_DIM") else None),
+        embed_timeout_seconds=_as_int("RECEIPT_EMBED_TIMEOUT_SECONDS", 90),
     )
