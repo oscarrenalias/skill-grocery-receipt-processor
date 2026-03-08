@@ -137,25 +137,6 @@ def test_cli_sample_parses_flags() -> None:
     assert args.output_path == "out.json"
 
 
-def test_cli_index_embeddings_parses_flags() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["index-embeddings", "--rebuild", "--batch-size", "32", "--limit", "100", "--output", "out.json"])
-    assert args.command == "index-embeddings"
-    assert args.rebuild is True
-    assert args.batch_size == 32
-    assert args.limit == 100
-    assert args.output_path == "out.json"
-
-
-def test_cli_semantic_search_parses_flags() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["semantic-search", "--text", "pasta like items", "--k", "20", "--max-distance", "0.9"])
-    assert args.command == "semantic-search"
-    assert args.query_text == "pasta like items"
-    assert args.k == 20
-    assert args.max_distance == 0.9
-
-
 def test_cli_main_show_text_output(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "load_dotenv", lambda: None)
     monkeypatch.setattr(cli, "create_engine_and_init", lambda _: object())
@@ -438,86 +419,4 @@ def test_cli_main_sample_output(monkeypatch, capsys) -> None:
     cli.main()
     out = capsys.readouterr().out.strip()
     assert out.startswith("{")
-    assert '"rows"' in out
-
-
-def test_cli_main_index_embeddings_output(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(
-        cli,
-        "load_settings",
-        lambda: type(
-            "S",
-            (),
-            {
-                "db_path": "receipts.sqlite",
-                "openai_api_key": "sk-test",
-                "openai_base_url": None,
-                "embed_model": "text-embedding-3-small",
-                "embed_batch_size": 64,
-                "embed_dim": 1536,
-                "embed_timeout_seconds": 90,
-            },
-        )(),
-    )
-    monkeypatch.setattr(
-        cli,
-        "index_item_embeddings",
-        lambda **kwargs: {
-            "status": "ok",
-            "indexed": 5,
-            "skipped": 2,
-            "failed": 0,
-            "duration_ms": 123,
-            "model": kwargs["model"],
-            "dim": kwargs["dim"],
-            "batch_size": kwargs["batch_size"],
-        },
-    )
-    monkeypatch.setattr(sys, "argv", ["receipt-processor", "index-embeddings", "--batch-size", "16", "--limit", "5"])
-
-    cli.main()
-    out = capsys.readouterr().out.strip()
-    assert out.startswith("{")
-    assert '"indexed": 5' in out
-    assert '"batch_size": 16' in out
-
-
-def test_cli_main_semantic_search_output(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(
-        cli,
-        "load_settings",
-        lambda: type(
-            "S",
-            (),
-            {
-                "db_path": "receipts.sqlite",
-                "openai_api_key": "sk-test",
-                "openai_base_url": None,
-                "embed_model": "text-embedding-3-small",
-                "embed_timeout_seconds": 90,
-            },
-        )(),
-    )
-    monkeypatch.setattr(
-        cli,
-        "semantic_search_items",
-        lambda **kwargs: {
-            "status": "ok",
-            "query": {"text": kwargs["query_text"], "model": kwargs["model"], "k": kwargs["k"], "max_distance": kwargs["max_distance"]},
-            "columns": ["iid", "distance", "fi"],
-            "rows": [[1, 0.11, "Myllyn Paras makaroni"]],
-            "meta": {"row_count": 1, "truncated": False, "limit_applied": kwargs["k"], "execution_ms": 7},
-        },
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["receipt-processor", "semantic-search", "--text", "pasta like items", "--k", "5"],
-    )
-
-    cli.main()
-    out = capsys.readouterr().out.strip()
-    assert out.startswith("{")
-    assert '"query"' in out
-    assert '"pasta like items"' in out
     assert '"rows"' in out

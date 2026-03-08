@@ -8,12 +8,10 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "openai>=2.6.1",
     "openai-agents>=0.10.5",
     "pydantic>=2.12.5",
     "pypdf>=6.7.5",
     "python-dotenv>=1.2.2",
-    "sqlite-vec>=0.1.6",
     "sqlalchemy>=2.0.48",
 ]
 

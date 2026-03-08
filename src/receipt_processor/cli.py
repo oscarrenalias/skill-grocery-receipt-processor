@@ -19,8 +19,6 @@ from receipt_processor.db import (
 from receipt_processor.errors import error_payload
 from receipt_processor.pipeline import process_receipt
 from receipt_processor.query import describe_table, execute_readonly_sql, get_schema_summary, sample_table
-from receipt_processor.semantic_search import semantic_search_items
-from receipt_processor.vector_index import index_item_embeddings
 
 
 class JsonArgumentParser(argparse.ArgumentParser):
@@ -129,47 +127,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of rows to return (default: 5)",
     )
     sample_parser.add_argument(
-        "--output",
-        dest="output_path",
-        help="Optional path to also write structured JSON output",
-    )
-
-    index_parser = subparsers.add_parser("index-embeddings", help="Build or refresh sqlite-vec item embeddings")
-    index_parser.add_argument(
-        "--rebuild",
-        action="store_true",
-        help="Drop and rebuild vector index from all receipt items",
-    )
-    index_parser.add_argument(
-        "--batch-size",
-        type=int,
-        help="Embedding API batch size (default from config)",
-    )
-    index_parser.add_argument(
-        "--limit",
-        type=int,
-        help="Optional cap on number of items considered for indexing",
-    )
-    index_parser.add_argument(
-        "--output",
-        dest="output_path",
-        help="Optional path to also write structured JSON output",
-    )
-
-    semantic_parser = subparsers.add_parser("semantic-search", help="Run vector similarity search over receipt items")
-    semantic_parser.add_argument("--text", required=True, dest="query_text", help="Free-text semantic query")
-    semantic_parser.add_argument(
-        "--k",
-        type=int,
-        default=10,
-        help="Maximum nearest neighbors to return (default: 10)",
-    )
-    semantic_parser.add_argument(
-        "--max-distance",
-        type=float,
-        help="Optional maximum vector distance threshold",
-    )
-    semantic_parser.add_argument(
         "--output",
         dest="output_path",
         help="Optional path to also write structured JSON output",
@@ -290,48 +247,6 @@ def main() -> None:
             payload = error_payload("INVALID_ARGUMENTS", str(exc))
         except Exception as exc:
             payload = error_payload("DB_READ_FAILED", f"Failed to sample table: {exc}")
-        _emit_json(payload, args.output_path)
-    elif args.command == "index-embeddings":
-        try:
-            settings = load_settings()
-            batch_size = args.batch_size if args.batch_size is not None else settings.embed_batch_size
-            payload = index_item_embeddings(
-                db_path=settings.db_path,
-                openai_api_key=settings.openai_api_key,
-                openai_base_url=settings.openai_base_url,
-                model=settings.embed_model,
-                batch_size=batch_size,
-                rebuild=args.rebuild,
-                limit=args.limit,
-                dim=settings.embed_dim,
-                timeout_seconds=settings.embed_timeout_seconds,
-            )
-        except ConfigError as exc:
-            payload = error_payload("CONFIG_ERROR", str(exc))
-        except ValueError as exc:
-            payload = error_payload("INVALID_ARGUMENTS", str(exc))
-        except Exception as exc:
-            payload = error_payload("PERSIST_FAILED", f"Failed to build embeddings: {exc}")
-        _emit_json(payload, args.output_path)
-    elif args.command == "semantic-search":
-        try:
-            settings = load_settings()
-            payload = semantic_search_items(
-                db_path=settings.db_path,
-                openai_api_key=settings.openai_api_key,
-                openai_base_url=settings.openai_base_url,
-                model=settings.embed_model,
-                query_text=args.query_text,
-                k=args.k,
-                max_distance=args.max_distance,
-                timeout_seconds=settings.embed_timeout_seconds,
-            )
-        except ConfigError as exc:
-            payload = error_payload("CONFIG_ERROR", str(exc))
-        except ValueError as exc:
-            payload = error_payload("INVALID_ARGUMENTS", str(exc))
-        except Exception as exc:
-            payload = error_payload("DB_READ_FAILED", f"Failed semantic search: {exc}")
         _emit_json(payload, args.output_path)
     else:  # pragma: no cover
         payload = error_payload("INVALID_ARGUMENTS", "Unknown command")

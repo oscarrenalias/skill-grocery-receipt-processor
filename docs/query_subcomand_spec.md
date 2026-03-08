@@ -12,7 +12,6 @@ The querying interface is exposed via the `receipt-processor sql` subcommand, wh
 * read-only by default
 * only allows a single statement
 * only allows a single exact `SELECT` statement
-* only allows queries against an explicit allowlist of tables exposed by the skill (including optional vector tables when enabled)
 * does not allow `WITH`, comments, semicolons, or leading/trailing whitespace in the query value
 * rejects `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `ATTACH`, `PRAGMA`, or any other non-SELECT statements
 * returns JSON only (as the output is intended only for agents, humans can just run the sqlite command line tool)

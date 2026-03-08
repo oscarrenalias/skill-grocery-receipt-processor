@@ -30,10 +30,6 @@ Optional:
 - `RECEIPT_PARSER_MODEL`
 - `RECEIPT_ENRICH_MODEL`
 - `RECEIPT_TIMEOUT_SECONDS`
-- `RECEIPT_EMBED_MODEL` (default `text-embedding-3-small`)
-- `RECEIPT_EMBED_BATCH_SIZE` (default `64`)
-- `RECEIPT_EMBED_DIM` (optional; inferred if omitted)
-- `RECEIPT_EMBED_TIMEOUT_SECONDS` (default `90`)
 
 ## CLI
 
@@ -45,8 +41,6 @@ receipt-processor sql --query "<select ...>" [--output /path/to/result.json]
 receipt-processor schema [--output /path/to/result.json]
 receipt-processor describe <table> [--output /path/to/result.json]
 receipt-processor sample <table> [--limit 5] [--output /path/to/result.json]
-receipt-processor index-embeddings [--rebuild] [--batch-size 64] [--limit 500] [--output /path/to/result.json]
-receipt-processor semantic-search --text "<query>" [--k 10] [--max-distance 0.9] [--output /path/to/result.json]
 ```
 
 Parameters:
@@ -67,19 +61,12 @@ Parameters:
 - `schema` List queryable tables and columns (JSON output only).
 - `describe <table>` Describe one queryable table (JSON output only).
 - `sample <table> --limit <n>` Return a small sample row set from one queryable table (JSON output only).
-- `index-embeddings` Build or refresh `sqlite-vec` item embeddings for semantic retrieval.
-- `index-embeddings --rebuild` Drop and rebuild the vector index from all items.
-- `index-embeddings --batch-size <n>` Override embedding API batch size.
-- `index-embeddings --limit <n>` Index only the first `n` items (useful for smoke tests).
-- `semantic-search --text "<query>"` Run vector semantic search over persisted items.
-- `semantic-search --k <n>` Number of nearest neighbors to return (default `10`, max `200`).
-- `semantic-search --max-distance <float>` Optional distance threshold to filter weak matches.
 - `--output <path>` Also write rendered output to file.
 
 `process` always prints structured JSON to stdout.  
 `show-receipt` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
 `list-receipts` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
-`sql`, `schema`, `describe`, `sample`, `index-embeddings`, and `semantic-search` always print JSON.
+`sql`, `schema`, `describe`, and `sample` always print JSON.
 
 `show-receipt --format text` output includes:
 
@@ -117,25 +104,8 @@ Default-valued fields are omitted to reduce payload size.
 - Query must be a single `SELECT` statement.
 - Query must not include leading/trailing whitespace, semicolons, SQL comments, or `WITH`.
 - Non-read keywords are rejected (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `ATTACH`, `PRAGMA`, etc.).
-- Queryable tables are: `receipts`, `receipt_items`, `receipt_adjustments`, `item_embedding_meta`, `item_embedding_vec`.
+- Only domain tables are allowed: `receipts`, `receipt_items`, `receipt_adjustments`.
 - Default row limit is applied when omitted (`LIMIT 5000`).
-- Queries touching vector tables require `sqlite-vec` to be installed and loaded.
-
-## Embedding Index Workflow
-
-1. Persist receipts with `process --persist`.
-2. Build embeddings with:
-
-```bash
-receipt-processor index-embeddings --batch-size 64
-```
-
-3. Use `schema` / `describe` / `sql` to inspect and query embedding metadata (`item_embedding_meta`) and vectors (`item_embedding_vec`).
-4. Run semantic retrieval directly from free text:
-
-```bash
-receipt-processor semantic-search --text "find pasta-like items" --k 10
-```
 
 Canonical JSON output for tabular results (`sql` and `sample`):
 

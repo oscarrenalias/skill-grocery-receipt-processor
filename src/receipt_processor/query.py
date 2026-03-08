@@ -21,35 +21,10 @@ DOMAIN_TABLES: dict[str, Table] = {
     "receipt_adjustments": receipt_adjustments,
 }
 
-VECTOR_TABLES = {
-    "item_embedding_meta",
-    "item_embedding_vec",
-}
-
-ALLOWED_QUERY_TABLES = set(DOMAIN_TABLES) | VECTOR_TABLES
-
 TABLE_DESCRIPTIONS = {
     "receipts": "Top-level receipt records and extraction status.",
     "receipt_items": "Normalized line items parsed from receipt rows.",
     "receipt_adjustments": "Discounts/adjustments applied at receipt or item level.",
-    "item_embedding_meta": "Embedding metadata keyed by receipt_items.iid.",
-    "item_embedding_vec": "sqlite-vec virtual table storing dense item embeddings.",
-}
-
-VECTOR_TABLE_COLUMNS = {
-    "item_embedding_meta": [
-        {"name": "iid", "type": "INTEGER", "nullable": False, "description": "Matches receipt_items.iid"},
-        {"name": "model", "type": "TEXT", "nullable": False, "description": "Embedding model id"},
-        {"name": "dim", "type": "INTEGER", "nullable": False, "description": "Embedding dimensionality"},
-        {"name": "payload_hash", "type": "TEXT", "nullable": False, "description": "Hash of canonical payload"},
-        {"name": "updated_at", "type": "TEXT", "nullable": False, "description": "Last index update timestamp"},
-    ],
-    "item_embedding_vec": [
-        {"name": "rowid", "type": "INTEGER", "nullable": False, "description": "Matches receipt_items.iid"},
-        {"name": "embedding", "type": "VECTOR", "nullable": False, "description": "Dense embedding vector"},
-        {"name": "distance", "type": "REAL", "nullable": True, "description": "Distance in MATCH queries"},
-        {"name": "k", "type": "INTEGER", "nullable": True, "description": "KNN neighbor count in MATCH queries"},
-    ],
 }
 
 _FORBIDDEN_KEYWORDS = (
@@ -73,62 +48,29 @@ _TABLE_REF_PATTERN = re.compile(r"\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_]*)\b",
 
 def execute_readonly_sql(db_path: str, query: str, default_limit: int = DEFAULT_SQL_LIMIT) -> dict:
     validated_query = _validate_query(query)
-    referenced_tables = _extract_table_references(validated_query)
     explicit_limit = _extract_limit(validated_query)
     limit_applied = explicit_limit if explicit_limit is not None else default_limit
     execution_query = validated_query if explicit_limit is not None else f"{validated_query} LIMIT {default_limit}"
-    return _execute_sql_and_format(
-        db_path,
-        execution_query,
-        limit_applied=limit_applied,
-        truncated_on_limit=True,
-        needs_sqlite_vec=bool(referenced_tables & VECTOR_TABLES),
-    )
+    return _execute_sql_and_format(db_path, execution_query, limit_applied=limit_applied, truncated_on_limit=True)
 
 
 def get_schema_summary(engine: Engine) -> dict:
     tables = [_build_table_description(table_name, table) for table_name, table in DOMAIN_TABLES.items()]
-    for table_name in sorted(VECTOR_TABLES):
-        tables.append(
-            {
-                "name": table_name,
-                "description": TABLE_DESCRIPTIONS.get(table_name, ""),
-                "columns": VECTOR_TABLE_COLUMNS[table_name],
-            }
-        )
     return {"status": "ok", "tables": tables}
 
 
 def describe_table(engine: Engine, table_name: str) -> dict:
     _ = engine  # kept for future dynamic introspection behavior
-    if table_name in DOMAIN_TABLES:
-        table = DOMAIN_TABLES[table_name]
-        return {"status": "ok", "table": _build_table_description(table_name, table)}
-    if table_name in VECTOR_TABLES:
-        return {
-            "status": "ok",
-            "table": {
-                "name": table_name,
-                "description": TABLE_DESCRIPTIONS.get(table_name, ""),
-                "columns": VECTOR_TABLE_COLUMNS[table_name],
-            },
-        }
-    allowed = ", ".join(sorted(ALLOWED_QUERY_TABLES))
-    raise ValueError(f"unknown table '{table_name}', allowed: {allowed}")
+    table = _get_domain_table(table_name)
+    return {"status": "ok", "table": _build_table_description(table_name, table)}
 
 
 def sample_table(db_path: str, table_name: str, limit: int = DEFAULT_SAMPLE_LIMIT) -> dict:
-    queryable = _get_queryable_table_name(table_name)
+    _get_domain_table(table_name)
     if limit < 1 or limit > MAX_SAMPLE_LIMIT:
         raise ValueError(f"sample limit must be between 1 and {MAX_SAMPLE_LIMIT}")
-    query = f"SELECT * FROM {queryable} LIMIT {limit}"
-    return _execute_sql_and_format(
-        db_path,
-        query,
-        limit_applied=limit,
-        truncated_on_limit=False,
-        needs_sqlite_vec=queryable in VECTOR_TABLES,
-    )
+    query = f"SELECT * FROM {table_name} LIMIT {limit}"
+    return _execute_sql_and_format(db_path, query, limit_applied=limit, truncated_on_limit=False)
 
 
 def _build_table_description(table_name: str, table: Table) -> dict:
@@ -169,7 +111,7 @@ def _validate_query(query: str) -> str:
             raise ValueError(f"keyword not allowed in query: {keyword}")
 
     referenced_tables = _extract_table_references(query)
-    disallowed = sorted({name for name in referenced_tables if name not in ALLOWED_QUERY_TABLES})
+    disallowed = sorted({name for name in referenced_tables if name not in DOMAIN_TABLES})
     if disallowed:
         raise ValueError(f"query references disallowed tables: {', '.join(disallowed)}")
     return query
@@ -195,14 +137,11 @@ def _execute_sql_and_format(
     *,
     limit_applied: int,
     truncated_on_limit: bool,
-    needs_sqlite_vec: bool,
 ) -> dict:
     path = Path(db_path).resolve()
     uri = f"file:{path}?mode=ro"
     start = time.perf_counter()
     with sqlite3.connect(uri, uri=True) as conn:
-        if needs_sqlite_vec:
-            _load_sqlite_vec(conn)
         conn.row_factory = None
         conn.set_progress_handler(_build_progress_timeout_handler(start, QUERY_TIMEOUT_MS), 10000)
         cur = conn.execute(query)
@@ -236,19 +175,9 @@ def _build_progress_timeout_handler(start: float, timeout_ms: int):
     return _handler
 
 
-def _get_queryable_table_name(table_name: str) -> str:
-    if table_name not in ALLOWED_QUERY_TABLES:
-        allowed = ", ".join(sorted(ALLOWED_QUERY_TABLES))
+def _get_domain_table(table_name: str) -> Table:
+    table = DOMAIN_TABLES.get(table_name)
+    if table is None:
+        allowed = ", ".join(sorted(DOMAIN_TABLES))
         raise ValueError(f"unknown table '{table_name}', allowed: {allowed}")
-    return table_name
-
-
-def _load_sqlite_vec(conn: sqlite3.Connection) -> None:
-    try:
-        import sqlite_vec  # type: ignore
-    except Exception as exc:  # pragma: no cover - import environment
-        raise RuntimeError("sqlite-vec is required to query vector tables. Run `uv sync`.") from exc
-
-    conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
+    return table

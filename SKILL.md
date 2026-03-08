@@ -59,15 +59,11 @@ uv run receipt-processor sql --query "<select ...>" [--output <json-path>]
 uv run receipt-processor schema [--output <json-path>]
 uv run receipt-processor describe <table> [--output <json-path>]
 uv run receipt-processor sample <table> [--limit 5] [--output <json-path>]
-uv run receipt-processor index-embeddings [--rebuild] [--batch-size 64] [--limit 500] [--output <json-path>]
-uv run receipt-processor semantic-search --text "<query>" [--k 10] [--max-distance 0.9] [--output <json-path>]
 ```
 
 Use `process` to parse a receipt PDF.  
 Use `show-receipt` to read one persisted receipt record (or the latest one).
 Use `sql`/`schema`/`describe`/`sample` for analytics and introspection workflows.
-Use `index-embeddings` to build semantic-search vectors for persisted receipt items.
-Use `semantic-search` for free-text nearest-neighbor lookup over persisted receipt items.
 
 ## File Input In OpenClaw
 
@@ -93,9 +89,8 @@ Notes:
   - User explicitly invokes `/receipt-processor` command in Telegram or other OpenClaw interfaces.
   - User asks to process a receipt PDF, e.g., "please process this receipt" or "can you process the attached receipt file?".
   - User asks to show a stored receipt by `rid` (unlikely, since it's a technical identifier) or the latest receipt.
-  - User asks for semantic similarity lookup (for example, "find items like pasta", "things similar to chicken", "semantic search").
 - Invocation style:
-  - The agent should run the dedicated CLI commands (`receipt-processor process ...`, `show-receipt ...`, `list-receipts ...`, `sql ...`, `schema ...`, `describe ...`, `sample ...`, `index-embeddings ...`, `semantic-search ...`), not rely on a separate tool API.
+  - The agent should run the dedicated CLI commands (`receipt-processor process ...`, `show-receipt ...`, `list-receipts ...`, `sql ...`, `schema ...`, `describe ...`, `sample ...`), not rely on a separate tool API.
 - Attachments flow (including Telegram):
   - User sends a PDF in Telegram.
   - OpenClaw downloads the attachment to a local file path.
@@ -110,7 +105,7 @@ User-facing reply guidance:
 
 `process` always prints JSON to stdout.  
 `show-receipt` prints plain text by default, JSON when `--format json`, and Markdown-ish text when `--format markdown`.
-`sql`, `schema`, `describe`, `sample`, `index-embeddings`, and `semantic-search` always print JSON.
+`sql`, `schema`, `describe`, and `sample` always print JSON.
 
 `process` success shape:
 
@@ -153,21 +148,8 @@ User-facing reply guidance:
 - Accepts SQL only via `--query`.
 - Allows a single read-only `SELECT` statement only.
 - Rejects comments, semicolons, `WITH`, and non-read SQL keywords.
-- Restricts queries to allowlisted tables (`receipts`, `receipt_items`, `receipt_adjustments`, `item_embedding_meta`, `item_embedding_vec`).
+- Restricts queries to domain tables (`receipts`, `receipt_items`, `receipt_adjustments`).
 - Returns canonical `columns`/`rows`/`meta` JSON payload.
-- Queries touching vector tables require `sqlite-vec`.
-
-`index-embeddings` behavior:
-
-- Uses OpenAI embeddings in batches and writes vectors to local `sqlite-vec` tables.
-- Incremental by default: unchanged items are skipped using payload hash comparison.
-- `--rebuild` drops and recreates the vector table and reindexes all items.
-
-`semantic-search` behavior:
-
-- Embeds free-text input and runs KNN search against `item_embedding_vec`.
-- Returns canonical tabular JSON (`columns`, `rows`, `meta`) plus `query` metadata.
-- Supports `--k` and optional `--max-distance` filtering.
 
 Error shape:
 
@@ -187,7 +169,6 @@ Set environment before running:
 - `OPENAI_API_KEY` (required for `process`)
 - Optional: `OPENAI_BASE_URL`
 - Optional DB/runtime vars: `RECEIPT_DB_PATH`, `RECEIPT_DEFAULT_CURRENCY`, `RECEIPT_PARSER_MODEL`, `RECEIPT_ENRICH_MODEL`, `RECEIPT_TIMEOUT_SECONDS`
-- Optional embedding vars: `RECEIPT_EMBED_MODEL`, `RECEIPT_EMBED_BATCH_SIZE`, `RECEIPT_EMBED_DIM`, `RECEIPT_EMBED_TIMEOUT_SECONDS`
 
 ### Required Secrets and Config
 
