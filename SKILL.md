@@ -83,6 +83,70 @@ Notes:
   - Prefer the first PDF.
   - If there are multiple PDFs and the user didn’t specify which, ask which one to process.
 
+## Image-based Receipts (JPG/PNG/HEIC) — Prerequisites & Flow
+
+The current `receipt-processor process` command expects a **PDF with extractable text**.
+Photos/screenshots of receipts (JPG/PNG/HEIC) must be OCR’d into a searchable PDF first.
+
+### System prerequisites (recommended: apt)
+
+Install OCR tooling and (at minimum) Finnish language data:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ocrmypdf tesseract-ocr tesseract-ocr-fin
+```
+
+Notes:
+
+- Add `tesseract-ocr-eng` as well if you want mixed Finnish/English OCR.
+- If the receipt photos are in HEIC, you may also need a converter/decoder on your system; prefer asking the user to send JPG/PNG if decoding is missing.
+
+### Python prerequisite (only if you need to wrap images into a PDF container)
+
+If your OCR flow starts from a raw image file, you’ll often need to first create a one-page PDF container.
+This repo can install Pillow inside its managed environment:
+
+```bash
+cd ~/.openclaw/workspace/skills/skill-grocery-receipt-processor
+uv pip install pillow
+```
+
+### Recommended flow (image → searchable PDF → process)
+
+1) **Copy inbound attachment** to a stable path (for example `samples/`).
+
+2) **Create a PDF container** from the image (example with Pillow):
+
+```bash
+uv run python - <<'PY'
+from PIL import Image
+img = Image.open('samples/inbound.jpg').convert('RGB')
+img.save('samples/inbound_raw.pdf', 'PDF', resolution=300.0)
+print('wrote samples/inbound_raw.pdf')
+PY
+```
+
+3) **OCR the PDF** to produce a searchable/text PDF:
+
+```bash
+ocrmypdf -l fin+eng --deskew --clean --optimize 1 --output-type pdfa-2 \
+  samples/inbound_raw.pdf samples/inbound_ocr.pdf
+```
+
+4) **Process and persist** as usual:
+
+```bash
+uv run receipt-processor process --input samples/inbound_ocr.pdf --persist
+```
+
+### Agent behavior guidance
+
+- If the user attaches an **image** (JPG/PNG/HEIC):
+  - Do **not** call `process` directly on the image.
+  - Perform the OCR flow above to generate `*_ocr.pdf`, then call `process` on that PDF.
+- Keep user-facing messages free of local filesystem paths; only return the parsed results (and `rid` when persisted).
+
 ## OpenClaw Wiring
 
 - Trigger conditions for this skill:
